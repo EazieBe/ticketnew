@@ -44,7 +44,9 @@ class User(Base):
 class FieldTech(Base):
     __tablename__ = 'field_techs'
     field_tech_id = Column(String, primary_key=True, index=True)
+    company_id = Column(String, ForeignKey('field_tech_companies.company_id'))
     name = Column(String, nullable=False)
+    tech_number = Column(String)
     phone = Column(String)
     email = Column(String)
     region = Column(String)
@@ -52,7 +54,27 @@ class FieldTech(Base):
     state = Column(String)
     zip = Column(String)
     notes = Column(Text)
+    service_radius_miles = Column(Integer)
     onsite_tickets = relationship('Ticket', back_populates='onsite_tech')
+    company = relationship('FieldTechCompany', back_populates='techs', foreign_keys=[company_id])
+
+class FieldTechCompany(Base):
+    """One company address; techs under this company use this address for map."""
+    __tablename__ = 'field_tech_companies'
+    company_id = Column(String, primary_key=True, index=True)
+    company_name = Column(String, nullable=False)
+    company_number = Column(String)
+    business_phone = Column(String)
+    other_phones = Column(Text)
+    address = Column(String)
+    city = Column(String)
+    state = Column(String)
+    zip = Column(String)
+    region = Column(String)
+    notes = Column(Text)
+    service_radius_miles = Column(Integer)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    techs = relationship('FieldTech', back_populates='company', foreign_keys='FieldTech.company_id')
 
 class Site(Base):
     __tablename__ = 'sites'

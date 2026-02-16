@@ -85,6 +85,8 @@ import CompactInventory from './CompactInventory';
 import CompactInventoryForm from './CompactInventoryForm';
 import CompactFieldTechs from './CompactFieldTechs';
 import CompactFieldTechForm from './CompactFieldTechForm';
+import CompactFieldTechCompanies from './CompactFieldTechCompanies';
+import CompactFieldTechCompanyForm from './CompactFieldTechCompanyForm';
 import CompactTasks from './CompactTasks';
 import CompactTaskForm from './CompactTaskForm';
 import CompactUsers from './CompactUsers';
@@ -1052,6 +1054,56 @@ function CompactFieldTechEditWrapper() {
   return <CompactFieldTechForm onSubmit={handleSubmit} initialValues={fieldTech} isEdit={true} />;
 }
 
+function CompactFieldTechCompanyFormWrapper() {
+  const navigate = useNavigate();
+  const api = useApi();
+  const { success, error } = useToast();
+  const handleSubmit = async (values) => {
+    try {
+      await api.post('/fieldtech-companies/', cleanFormData(values));
+      success('Company created');
+      navigate('/companies');
+    } catch {
+      error('Failed');
+    }
+  };
+  return <CompactFieldTechCompanyForm onSubmit={handleSubmit} initialValues={{}} isEdit={false} />;
+}
+
+function CompactFieldTechCompanyEditWrapper() {
+  const navigate = useNavigate();
+  const { company_id } = useParams();
+  const api = useApi();
+  const { error, success } = useToast();
+  const [company, setCompany] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    const fetchCompany = async () => {
+      try {
+        const response = await api.get(`/fieldtech-companies/${company_id}`);
+        setCompany(response);
+      } catch {
+        error('Error loading');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchCompany();
+  }, [company_id, api, error]);
+  const handleSubmit = async (values) => {
+    try {
+      await api.put(`/fieldtech-companies/${company_id}`, cleanFormData(values));
+      success('Company updated');
+      navigate('/companies');
+    } catch {
+      error('Failed');
+    }
+  };
+  if (loading) return <div>Loading...</div>;
+  if (!company) return <div>Not found</div>;
+  return <CompactFieldTechCompanyForm onSubmit={handleSubmit} initialValues={company} isEdit={true} />;
+}
+
 // ========================================
 // Color theme options
 const colorThemes = {
@@ -1224,6 +1276,12 @@ const navigationItems = [
     title: 'Field Techs',
     path: '/fieldtechs',
     icon: <Engineering sx={{ color: '#00796b' }} />,
+    badge: null
+  },
+  {
+    title: 'Companies',
+    path: '/companies',
+    icon: <Business sx={{ color: '#5d4037' }} />,
     badge: null
   },
   {
@@ -1771,6 +1829,11 @@ function AppLayout() {
             <Route path="/fieldtechs" element={<CompactFieldTechs />} />
             <Route path="/fieldtechs/new" element={<CompactFieldTechFormWrapper />} />
             <Route path="/fieldtechs/:field_tech_id/edit" element={<CompactFieldTechEditWrapper />} />
+
+            {/* Company Routes - ALL COMPACT */}
+            <Route path="/companies" element={<CompactFieldTechCompanies />} />
+            <Route path="/companies/new" element={<CompactFieldTechCompanyFormWrapper />} />
+            <Route path="/companies/:company_id/edit" element={<CompactFieldTechCompanyEditWrapper />} />
             
             {/* Other Routes */}
             <Route path="/audit" element={<Audit />} />

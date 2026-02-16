@@ -12,10 +12,11 @@ function useApi() {
     setLoading(true);
     
     try {
+      const isFormData = typeof FormData !== 'undefined' && data instanceof FormData;
       const config = {
         method,
         headers: {
-          'Content-Type': 'application/json',
+          ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
           ...options.headers,
         },
         ...options,

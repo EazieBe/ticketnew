@@ -46,7 +46,9 @@ class UserOut(UserBase):
     model_config = ConfigDict(from_attributes=True)
 
 class FieldTechBase(BaseModel):
+    company_id: Optional[str] = None
     name: str
+    tech_number: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[EmailStr] = None
     region: Optional[str] = None
@@ -54,6 +56,7 @@ class FieldTechBase(BaseModel):
     state: Optional[str] = None
     zip: Optional[str] = None
     notes: Optional[str] = None
+    service_radius_miles: Optional[int] = None
 
 class FieldTechCreate(FieldTechBase):
     pass
@@ -61,6 +64,34 @@ class FieldTechCreate(FieldTechBase):
 class FieldTechOut(FieldTechBase):
     field_tech_id: str
     
+    model_config = ConfigDict(from_attributes=True)
+
+class FieldTechCompanyBase(BaseModel):
+    company_name: str
+    company_number: Optional[str] = None
+    business_phone: Optional[str] = None
+    other_phones: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip: Optional[str] = None
+    region: Optional[str] = None
+    notes: Optional[str] = None
+    service_radius_miles: Optional[int] = None
+
+class FieldTechCompanyCreate(FieldTechCompanyBase):
+    pass
+
+class FieldTechOutNested(FieldTechBase):
+    field_tech_id: str
+    model_config = ConfigDict(from_attributes=True)
+
+class FieldTechCompanyOut(FieldTechCompanyBase):
+    company_id: str
+    created_at: Optional[datetime] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    techs: Optional[List[FieldTechOutNested]] = None
     model_config = ConfigDict(from_attributes=True)
 
 class SiteBase(BaseModel):

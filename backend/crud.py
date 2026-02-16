@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session, joinedload, selectinload
-from sqlalchemy import and_, or_, desc, asc, case, update
+from sqlalchemy import and_, or_, desc, asc, case, update, func
 import models, schemas
 import uuid
 from datetime import date, datetime, timezone
@@ -718,20 +718,103 @@ def delete_shipment_item(db: Session, shipment_item_id: str):
     db.commit()
     return db_shipment_item
 
+# Field Tech Company CRUD
+def create_field_tech_company(db: Session, company: schemas.FieldTechCompanyCreate):
+    """Create company; region derived from state."""
+    from region_utils import state_to_region
+    region = state_to_region(company.state) if company.state else company.region
+    company_id = generate_sequential_id(db, models.FieldTechCompany, 'company_id', 'FTC', 6)
+    db_company = models.FieldTechCompany(
+        company_id=company_id,
+        company_name=company.company_name,
+        company_number=company.company_number,
+        business_phone=company.business_phone,
+        other_phones=company.other_phones,
+        address=company.address,
+        city=company.city,
+        state=company.state,
+        zip=company.zip,
+        region=region or company.region,
+        notes=company.notes,
+        service_radius_miles=company.service_radius_miles,
+    )
+    db.add(db_company)
+    db.commit()
+    db.refresh(db_company)
+    return db_company
+
+def get_field_tech_company(db: Session, company_id: str):
+    """Get company with techs."""
+    return db.query(models.FieldTechCompany).options(
+        selectinload(models.FieldTechCompany.techs)
+    ).filter(models.FieldTechCompany.company_id == company_id).first()
+
+def get_field_tech_companies(db: Session, skip: int = 0, limit: int = 100, region: Optional[str] = None, state: Optional[str] = None, city: Optional[str] = None, include_techs: bool = False):
+    """List companies with optional region/state/city filter for map."""
+    query = db.query(models.FieldTechCompany)
+    if include_techs:
+        query = query.options(selectinload(models.FieldTechCompany.techs))
+    if region:
+        query = query.filter(models.FieldTechCompany.region == region)
+    if state:
+        query = query.filter(models.FieldTechCompany.state == state)
+    if city:
+        query = query.filter(func.lower(models.FieldTechCompany.city) == city.lower())
+    return query.order_by(models.FieldTechCompany.company_name).offset(skip).limit(limit).all()
+
+def update_field_tech_company(db: Session, company_id: str, company: schemas.FieldTechCompanyCreate):
+    """Update company; region derived from state."""
+    from region_utils import state_to_region
+    db_company = db.query(models.FieldTechCompany).filter(models.FieldTechCompany.company_id == company_id).first()
+    if not db_company:
+        return None
+    data = company.model_dump(exclude_unset=True)
+    region = state_to_region(data.get('state') or db_company.state)
+    if region:
+        data['region'] = region
+    for field, value in data.items():
+        if hasattr(db_company, field):
+            setattr(db_company, field, value)
+    db.commit()
+    db.refresh(db_company)
+    return db_company
+
+def delete_field_tech_company(db: Session, company_id: str):
+    """Delete company only if no techs."""
+    db_company = db.query(models.FieldTechCompany).filter(models.FieldTechCompany.company_id == company_id).first()
+    if not db_company:
+        return None
+    tech_count = db.query(models.FieldTech).filter(models.FieldTech.company_id == company_id).count()
+    if tech_count > 0:
+        raise ValueError(f"Cannot delete company with {tech_count} techs. Remove or reassign techs first.")
+    db.delete(db_company)
+    db.commit()
+    return db_company
+
 # Field Tech CRUD - Optimized
 def create_field_tech(db: Session, tech: schemas.FieldTechCreate):
     """Create field tech with optimized query"""
     db_tech = models.FieldTech(
         field_tech_id=str(uuid.uuid4()),
+        company_id=getattr(tech, 'company_id', None),
         name=tech.name,
+        tech_number=getattr(tech, 'tech_number', None),
         phone=tech.phone,
         email=tech.email,
         region=tech.region,
         city=tech.city,
         state=tech.state,
         zip=tech.zip,
-        notes=tech.notes
+        notes=tech.notes,
+        service_radius_miles=getattr(tech, 'service_radius_miles', None),
     )
+    if db_tech.company_id:
+        comp = db.query(models.FieldTechCompany).filter(models.FieldTechCompany.company_id == db_tech.company_id).first()
+        if comp:
+            db_tech.region = db_tech.region or comp.region
+            db_tech.city = db_tech.city or comp.city
+            db_tech.state = db_tech.state or comp.state
+            db_tech.zip = db_tech.zip or comp.zip
     db.add(db_tech)
     db.commit()
     db.refresh(db_tech)

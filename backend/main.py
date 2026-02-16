@@ -57,13 +57,14 @@ app.add_middleware(
 )
 
 # Include routers
-from routers import tickets, users, sites, shipments, fieldtechs, tasks, equipment, inventory, sla, audit, logging, search
+from routers import tickets, users, sites, shipments, fieldtechs, fieldtech_companies, tasks, equipment, inventory, sla, audit, logging, search
 
 app.include_router(tickets.router)
 app.include_router(users.router)
 app.include_router(sites.router)
 app.include_router(shipments.router)
 app.include_router(fieldtechs.router)
+app.include_router(fieldtech_companies.router)
 app.include_router(tasks.router)
 app.include_router(equipment.router)
 app.include_router(inventory.router)
