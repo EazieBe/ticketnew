@@ -1,36 +1,32 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Button, IconButton, Stack, TextField, InputAdornment, Typography,
-  CircularProgress
+  Button, IconButton, Stack, TextField, InputAdornment, Typography
 } from '@mui/material';
-import { Add, Edit, Delete, Search, Refresh, Business } from '@mui/icons-material';
+import { Add, Edit, Search, Refresh, UploadFile } from '@mui/icons-material';
 import { useToast } from './contexts/ToastContext';
 import useApi from './hooks/useApi';
-import useThemeTokens from './hooks/useThemeTokens';
-import { getApiPath } from './apiPaths';
 
 function CompactFieldTechCompanies() {
   const navigate = useNavigate();
   const api = useApi();
   const apiRef = useRef(api);
-  apiRef.current = api;
-  const { tableHeaderBg, rowHoverBg } = useThemeTokens();
-  const { error: showError, success } = useToast();
+  const { success, error: showError } = useToast();
   const [companies, setCompanies] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
+
+  useEffect(() => {
+    apiRef.current = api;
+  }, [api]);
 
   const fetchCompanies = useCallback(async () => {
-    setLoading(true);
     try {
-      const response = await apiRef.current.get(`${getApiPath('fieldtechCompanies')}/?limit=500`);
+      const response = await apiRef.current.get('/fieldtech-companies/?include_techs=true');
       setCompanies(response || []);
-    } catch (err) {
-      showError(err?.response?.data?.detail || err?.message || 'Failed to load companies');
-    } finally {
-      setLoading(false);
+    } catch {
+      showError('Failed to load companies');
     }
   }, [showError]);
 
@@ -38,119 +34,120 @@ function CompactFieldTechCompanies() {
     fetchCompanies();
   }, [fetchCompanies]);
 
-  const filtered = companies.filter(c =>
-    !search ||
-    (c.company_name || '').toLowerCase().includes(search.toLowerCase()) ||
-    (c.city || '').toLowerCase().includes(search.toLowerCase()) ||
-    (c.state || '').toLowerCase().includes(search.toLowerCase()) ||
-    (c.region || '').toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredCompanies = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return companies;
+    return companies.filter((c) =>
+      [c.company_name, c.company_number, c.city, c.state, c.zip, c.region]
+        .filter(Boolean)
+        .some((v) => v.toLowerCase().includes(term))
+    );
+  }, [companies, search]);
 
-  const handleDelete = async (e, c) => {
-    e.stopPropagation();
-    if (!window.confirm(`Delete company "${c.company_name}"? This will fail if techs are assigned.`)) return;
+  const handleImport = async (file) => {
+    if (!file) return;
+    const form = new FormData();
+    form.append('file', file);
+    setIsImporting(true);
     try {
-      await apiRef.current.delete(`${getApiPath('fieldtechCompanies')}/${c.company_id}`);
-      success('Company deleted');
-      fetchCompanies();
-    } catch (err) {
-      showError(err?.response?.data?.detail || err?.message || 'Failed to delete');
+      const res = await apiRef.current.post('/fieldtech-companies/import', form);
+      const summary = [
+        `Companies created: ${res.created_companies}`,
+        `Companies updated: ${res.updated_companies}`,
+        `Techs created: ${res.created_techs}`,
+        `Rows skipped: ${res.skipped_rows}`,
+      ].join(' | ');
+      success(summary);
+      await fetchCompanies();
+    } catch {
+      showError('Import failed');
+    } finally {
+      setIsImporting(false);
     }
   };
 
   return (
-    <Box sx={{ p: 2, height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <Stack direction="row" justifyContent="space-between" mb={1}>
-        <Typography variant="subtitle1" fontWeight="bold" sx={{ fontSize: '0.95rem' }}>
-          Field Tech Companies ({filtered.length})
-        </Typography>
-        <Stack direction="row" spacing={1}>
-          <TextField
-            size="small"
-            placeholder="Search company, city, state..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Search fontSize="small" />
-                </InputAdornment>
-              )
-            }}
-            sx={{ width: 240, '& input': { py: 0.5, fontSize: '0.875rem' } }}
+    <Box sx={{ p: 2 }}>
+      <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
+        <Typography variant="h6">Field Tech Companies</Typography>
+        <Button variant="contained" startIcon={<Add />} onClick={() => navigate('/companies/new')}>
+          New
+        </Button>
+        <Button
+          component="label"
+          variant="outlined"
+          startIcon={<UploadFile />}
+          disabled={isImporting}
+        >
+          Import CSV
+          <input
+            hidden
+            type="file"
+            accept=".csv"
+            onChange={(e) => handleImport(e.target.files?.[0])}
           />
-          <Button
-            size="small"
-            variant="contained"
-            startIcon={<Add />}
-            onClick={() => navigate('/companies/new')}
-          >
-            New Company
-          </Button>
-          <IconButton size="small" onClick={fetchCompanies} title="Refresh">
-            <Refresh fontSize="small" />
-          </IconButton>
-        </Stack>
+        </Button>
+        <IconButton onClick={fetchCompanies} aria-label="refresh">
+          <Refresh />
+        </IconButton>
+        <TextField
+          size="small"
+          placeholder="Search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          sx={{ ml: 'auto', width: 260 }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <Search />
+              </InputAdornment>
+            ),
+          }}
+        />
       </Stack>
-
-      <Paper sx={{ flex: 1, overflow: 'hidden' }}>
-        <TableContainer sx={{ height: '100%' }}>
-          <Table size="small" stickyHeader sx={{ '& td, & th': { py: 0.5, px: 1, fontSize: '0.75rem', whiteSpace: 'nowrap' } }}>
+      <Paper>
+        <TableContainer>
+          <Table size="small">
             <TableHead>
-              <TableRow sx={{ '& th': { bgcolor: tableHeaderBg, fontWeight: 'bold', borderBottom: 2, borderColor: 'primary.main' } }}>
+              <TableRow>
                 <TableCell>Company</TableCell>
-                <TableCell>Address</TableCell>
-                <TableCell>City</TableCell>
-                <TableCell>State</TableCell>
-                <TableCell>Region</TableCell>
-                <TableCell>Actions</TableCell>
+                <TableCell>Location</TableCell>
+                <TableCell>Phones</TableCell>
+                <TableCell>Techs</TableCell>
+                <TableCell align="right">Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
-                    <CircularProgress size={32} />
+              {filteredCompanies.map((c) => (
+                <TableRow key={c.company_id} hover>
+                  <TableCell>
+                    <Typography variant="subtitle2">{c.company_name}</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {c.company_number || ''}
+                    </Typography>
+                  </TableCell>
+                  <TableCell>
+                    {[c.city, c.state, c.zip].filter(Boolean).join(', ')}
+                  </TableCell>
+                  <TableCell>
+                    {[c.business_phone, c.other_phones].filter(Boolean).join(' | ')}
+                  </TableCell>
+                  <TableCell>{c.techs ? c.techs.length : 0}</TableCell>
+                  <TableCell align="right">
+                    <IconButton onClick={() => navigate(`/companies/${c.company_id}/edit`)}>
+                      <Edit />
+                    </IconButton>
                   </TableCell>
                 </TableRow>
-              ) : filtered.length === 0 ? (
+              ))}
+              {filteredCompanies.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
-                    <Typography color="text.secondary">
-                      {companies.length === 0 ? 'No companies yet. Add one to assign techs and show on the map.' : 'No results match your search.'}
+                  <TableCell colSpan={5}>
+                    <Typography variant="body2" color="text.secondary">
+                      No companies found.
                     </Typography>
                   </TableCell>
                 </TableRow>
-              ) : (
-                filtered.map((c) => (
-                  <TableRow
-                    key={c.company_id}
-                    hover
-                    sx={{ cursor: 'pointer', '&:hover': { bgcolor: rowHoverBg } }}
-                    onClick={() => navigate(`/companies/${c.company_id}/edit`)}
-                  >
-                    <TableCell>
-                      <Stack direction="row" alignItems="center" spacing={0.5}>
-                        <Business sx={{ fontSize: 16, color: 'text.secondary' }} />
-                        <Typography variant="body2" sx={{ fontSize: '0.75rem' }}>{c.company_name}</Typography>
-                      </Stack>
-                    </TableCell>
-                    <TableCell><Typography variant="caption" sx={{ fontSize: '0.7rem' }}>{c.address || '—'}</Typography></TableCell>
-                    <TableCell><Typography variant="caption" sx={{ fontSize: '0.7rem' }}>{c.city || '—'}</Typography></TableCell>
-                    <TableCell><Typography variant="caption" sx={{ fontSize: '0.7rem' }}>{c.state || '—'}</Typography></TableCell>
-                    <TableCell><Typography variant="caption" sx={{ fontSize: '0.7rem' }}>{c.region || '—'}</Typography></TableCell>
-                    <TableCell onClick={(e) => e.stopPropagation()}>
-                      <Stack direction="row" spacing={0.5}>
-                        <IconButton size="small" sx={{ p: 0.3 }} title="Edit" onClick={() => navigate(`/companies/${c.company_id}/edit`)}>
-                          <Edit sx={{ fontSize: 16 }} />
-                        </IconButton>
-                        <IconButton size="small" sx={{ p: 0.3 }} title="Delete" color="error" onClick={(e) => handleDelete(e, c)}>
-                          <Delete sx={{ fontSize: 16 }} />
-                        </IconButton>
-                      </Stack>
-                    </TableCell>
-                  </TableRow>
-                ))
               )}
             </TableBody>
           </Table>

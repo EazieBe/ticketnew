@@ -8,8 +8,9 @@ uvicorn[standard]==0.30.*
 alembic==1.12.1
 psycopg2-binary==2.9.*
 
-# Authentication & Security (code uses PyJWT: import jwt)
-PyJWT>=2.8.0
+# Authentication & Security
+PyJWT==2.11.0
+python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 
 # Utilities
@@ -18,10 +19,4 @@ zipcodes>=1.3.0  # US ZIP→city/state/lat/lng, no API key
 pydantic-settings==2.1.0
 python-dotenv==1.0.0
 email-validator==2.1.0 
-
-# Async Redis and testing tools
-redis>=5.0.0
-pytest>=7.0.0
-pytest-asyncio>=0.21.0
-httpx>=0.24.0
-asgi-lifespan>=2.1.0
+redis==7.1.0

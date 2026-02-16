@@ -778,6 +778,8 @@ def create_field_tech_company(db: Session, company: schemas.FieldTechCompanyCrea
         company_id=company_id,
         company_name=company.company_name,
         company_number=company.company_number,
+        business_phone=company.business_phone,
+        other_phones=company.other_phones,
         address=company.address,
         city=company.city,
         state=company.state,
@@ -797,17 +799,8 @@ def get_field_tech_company(db: Session, company_id: str):
         selectinload(models.FieldTechCompany.techs)
     ).filter(models.FieldTechCompany.company_id == company_id).first()
 
-def get_field_tech_companies(
-    db: Session,
-    skip: int = 0,
-    limit: int = 100,
-    region: Optional[str] = None,
-    state: Optional[str] = None,
-    city: Optional[str] = None,
-    include_techs: bool = False,
-    search: Optional[str] = None,
-):
-    """List companies with optional region/state/city/search filter for map. include_techs eager-loads techs."""
+def get_field_tech_companies(db: Session, skip: int = 0, limit: int = 100, region: Optional[str] = None, state: Optional[str] = None, city: Optional[str] = None, include_techs: bool = False):
+    """List companies with optional region/state/city filter for map."""
     query = db.query(models.FieldTechCompany)
     if include_techs:
         query = query.options(selectinload(models.FieldTechCompany.techs))
@@ -817,19 +810,6 @@ def get_field_tech_companies(
         query = query.filter(models.FieldTechCompany.state == state)
     if city:
         query = query.filter(func.lower(models.FieldTechCompany.city) == city.lower())
-    if search:
-        like = f"%{search.strip()}%"
-        # Search by company fields and associated tech fields
-        query = query.outerjoin(models.FieldTechCompany.techs).filter(or_(
-            models.FieldTechCompany.company_name.ilike(like),
-            models.FieldTechCompany.city.ilike(like),
-            models.FieldTechCompany.state.ilike(like),
-            models.FieldTechCompany.region.ilike(like),
-            models.FieldTech.name.ilike(like),
-            models.FieldTech.phone.ilike(like),
-            models.FieldTech.tech_number.ilike(like),
-            models.FieldTech.email.ilike(like),
-        )).distinct()
     return query.order_by(models.FieldTechCompany.company_name).offset(skip).limit(limit).all()
 
 def update_field_tech_company(db: Session, company_id: str, company: schemas.FieldTechCompanyCreate):
@@ -850,7 +830,7 @@ def update_field_tech_company(db: Session, company_id: str, company: schemas.Fie
     return db_company
 
 def delete_field_tech_company(db: Session, company_id: str):
-    """Delete company only if no techs (or cascade unlink techs)."""
+    """Delete company only if no techs."""
     db_company = db.query(models.FieldTechCompany).filter(models.FieldTechCompany.company_id == company_id).first()
     if not db_company:
         return None
@@ -886,8 +866,6 @@ def create_field_tech(db: Session, tech: schemas.FieldTechCreate):
             db_tech.city = db_tech.city or comp.city
             db_tech.state = db_tech.state or comp.state
             db_tech.zip = db_tech.zip or comp.zip
-    elif db_tech.state and not db_tech.region:
-        db_tech.region = state_to_region(db_tech.state)
     db.add(db_tech)
     db.commit()
     db.refresh(db_tech)

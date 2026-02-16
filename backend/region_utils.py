@@ -1,9 +1,7 @@
 """
-US state → region mapping (derived from state for map filter).
-No API key; accurate for standard US Census regions.
+US state → region mapping and state list helpers.
 """
 
-# US Census Bureau regions (state abbreviation → region name)
 _STATE_TO_REGION = {
     "AL": "South", "AR": "South", "DE": "Northeast", "FL": "South", "GA": "South",
     "KY": "South", "LA": "South", "MD": "South", "MS": "South", "NC": "South",
@@ -21,23 +19,15 @@ _STATE_TO_REGION = {
 
 
 def state_to_region(state: str) -> str | None:
-    """Return region name for a US state abbreviation (e.g. 'TX' → 'South')."""
     if not state:
         return None
     abbr = (state or "").strip().upper()
     if len(abbr) == 2:
         return _STATE_TO_REGION.get(abbr)
-    # Allow full state name → lookup by value (slow path)
-    abbr_to_region = _STATE_TO_REGION
-    for ab, reg in abbr_to_region.items():
-        if reg.upper() == abbr:
-            return reg
     return None
 
 
 def get_us_states_for_dropdown():
-    """Return list of { value: 'XX', label: 'State Name' } for dropdowns. Sorted by label."""
-    # State abbreviation → full name (common list, no API)
     _ABBR_TO_NAME = {
         "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", "CA": "California",
         "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware", "FL": "Florida", "GA": "Georgia",
@@ -51,5 +41,7 @@ def get_us_states_for_dropdown():
         "VA": "Virginia", "WA": "Washington", "WV": "West Virginia", "WI": "Wisconsin", "WY": "Wyoming",
         "DC": "District of Columbia",
     }
-    out = [{"value": abbr, "label": _ABBR_TO_NAME[abbr]} for abbr in sorted(_ABBR_TO_NAME.keys(), key=lambda a: _ABBR_TO_NAME[a])]
-    return out
+    return [
+        {"value": abbr, "label": _ABBR_TO_NAME[abbr]}
+        for abbr in sorted(_ABBR_TO_NAME.keys(), key=lambda a: _ABBR_TO_NAME[a])
+    ]
