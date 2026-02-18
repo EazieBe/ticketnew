@@ -5,13 +5,14 @@ import {
   Tooltip, FormControl, InputLabel, Select, MenuItem
 } from '@mui/material';
 import {
-  LocationOn, Person, FilterList, Business, ZoomIn, ZoomOut, MyLocation, Refresh, Directions
+  LocationOn, Person, FilterList, Business, ZoomIn, ZoomOut, MyLocation, Refresh, Directions, Edit
 } from '@mui/icons-material';
 import useApi from './hooks/useApi';
 import useThemeTokens from './hooks/useThemeTokens';
 import useReadableChip from './hooks/useReadableChip';
 import { useDataSync } from './contexts/DataSyncContext';
 import { getApiPath } from './apiPaths';
+import { useNavigate } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -97,7 +98,14 @@ function MapRefCapture({ mapInstanceRef }) {
   const map = useMap();
   useEffect(() => {
     mapInstanceRef.current = map;
-    return () => { mapInstanceRef.current = null; };
+    // Fix blank map: recalc tiles when container becomes visible
+    const t = setTimeout(() => {
+      if (mapInstanceRef.current) mapInstanceRef.current.invalidateSize();
+    }, 100);
+    return () => {
+      clearTimeout(t);
+      mapInstanceRef.current = null;
+    };
   }, [map, mapInstanceRef]);
   return null;
 }
@@ -243,6 +251,7 @@ function matchCompanySearch(c, searchTerm) {
 }
 
 function FieldTechMap() {
+  const navigate = useNavigate();
   const api = useApi();
   const apiRef = useRef(api);
   apiRef.current = api;
@@ -592,6 +601,11 @@ function FieldTechMap() {
         }
         actions={
           <>
+            {selectedCompany?.company_id && (
+              <Button startIcon={<Edit />} onClick={() => { setDetailsOpen(false); navigate(`/companies/${selectedCompany.company_id}/edit`); }}>
+                Edit company
+              </Button>
+            )}
             {selectedCompany?.lat != null && selectedCompany?.lng != null && (
               <Button startIcon={<Directions />} onClick={() => handleDirections(selectedCompany)}>
                 Get Directions
@@ -604,12 +618,20 @@ function FieldTechMap() {
       >
         {selectedCompany && (
           <Grid container spacing={2}>
+            {(selectedCompany.company_number || selectedCompany.business_phone || selectedCompany.other_phones) && (
+              <Grid item xs={12}>
+                <Typography variant="subtitle2" gutterBottom>Company # & phones</Typography>
+                <Typography variant="body2">
+                  {[selectedCompany.company_number && `#${selectedCompany.company_number}`, selectedCompany.business_phone, selectedCompany.other_phones].filter(Boolean).join(' • ')}
+                </Typography>
+              </Grid>
+            )}
             <Grid item xs={12}>
               <Typography variant="subtitle2" gutterBottom>Address</Typography>
               <Box display="flex" alignItems="center" sx={{ mb: 1 }}>
                 <LocationOn sx={{ mr: 1 }} />
                 <Typography variant="body2">
-                  {[selectedCompany.address, [selectedCompany.city, selectedCompany.state].filter(Boolean).join(', '), selectedCompany.zip].filter(Boolean).join(' ')}
+                  {[selectedCompany.address, [selectedCompany.city, selectedCompany.state].filter(Boolean).join(', '), selectedCompany.zip].filter(Boolean).join(' ') || '—'}
                 </Typography>
               </Box>
               {selectedCompany.region && (

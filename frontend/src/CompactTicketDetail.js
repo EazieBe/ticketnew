@@ -6,7 +6,7 @@ import {
   DialogTitle, DialogContent, DialogActions, DialogContentText, Select, MenuItem,
   InputLabel, FormControl, Checkbox, FormControlLabel
 } from '@mui/material';
-import { ArrowBack, Edit, AccessTime, CheckCircle, Warning, Delete, PanTool, Timer } from '@mui/icons-material';
+import { ArrowBack, Edit, AccessTime, CheckCircle, Warning, Delete, PanTool, Timer, Assignment } from '@mui/icons-material';
 import { useToast } from './contexts/ToastContext';
 import { useAuth } from './AuthContext';
 import useApi from './hooks/useApi';
@@ -17,6 +17,52 @@ import TypeChip from './components/TypeChip';
 import useReadableChip from './hooks/useReadableChip';
 import CompactShipmentForm from './CompactShipmentForm';
 import { canDelete } from './utils/permissions';
+import { sanitizeInput } from './utils/security';
+
+/** Renders notes with preserved formatting (newlines, indents) and styled email blocks */
+function NotesDisplay({ notes, codeBlockBg }) {
+  if (!notes) return <Typography color="text.secondary">No notes</Typography>;
+  const sanitized = sanitizeInput(notes);
+  const chunks = sanitized.split(/\n\n---\s*From email\s*---\n*/i);
+  return (
+    <Stack spacing={2}>
+      {chunks.map((chunk, i) => {
+        const trimmed = chunk.trim();
+        if (!trimmed) return null;
+        const isEmailImport = i > 0 || /^(Subject|From|Date):/m.test(trimmed);
+        return (
+          <Box key={i}>
+            {isEmailImport && (
+              <Typography variant="caption" color="primary.main" fontWeight="600" sx={{ mb: 0.5, display: 'block' }}>
+                Imported from email
+              </Typography>
+            )}
+            <Box
+              component="pre"
+              sx={{
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                fontFamily: 'inherit',
+                fontSize: '0.875rem',
+                lineHeight: 1.6,
+                margin: 0,
+                p: isEmailImport ? 2 : 0,
+                ...(isEmailImport && {
+                  bgcolor: codeBlockBg,
+                  borderRadius: 1,
+                  borderLeft: '4px solid',
+                  borderColor: 'primary.main'
+                })
+              }}
+            >
+              {trimmed}
+            </Box>
+          </Box>
+        );
+      })}
+    </Stack>
+  );
+}
 
 // Live Timer Component
 function LiveTimer({ startTime }) {
@@ -74,6 +120,7 @@ function CompactTicketDetail() {
   const [shipments, setShipments] = useState([]);
   const [addShipmentOpen, setAddShipmentOpen] = useState(false);
   const [inventory, setInventory] = useState([]);
+  const [tasks, setTasks] = useState([]);
   const loadingRef = useRef(false);
 
   const load = async () => {
@@ -81,18 +128,20 @@ function CompactTicketDetail() {
     loadingRef.current = true;
     
     try {
-      const [t, c, te, sh, inv] = await Promise.all([
+      const [t, c, te, sh, inv, tk] = await Promise.all([
         api.get(`/tickets/${ticketId}`),
         api.get(`/tickets/${ticketId}/comments`),
         api.get(`/tickets/${ticketId}/time-entries/`),
         api.get(`/shipments?ticket_id=${ticketId}&limit=200&skip=0`),
-        api.get('/inventory?limit=200&skip=0')
+        api.get('/inventory?limit=200&skip=0'),
+        api.get(`/tasks?ticket_id=${ticketId}&limit=200`)
       ]);
       setTicket(t);
       setComments(c || []);
       setTimeEntries(te || []);
       setShipments(sh || []);
       setInventory(inv || []);
+      setTasks(tk || []);
     } catch (err) {
       showError('Failed to load');
     } finally {
@@ -258,7 +307,10 @@ function CompactTicketDetail() {
             </Grid>
           )}
           <Grid item xs={12}><Divider sx={{ my: 1 }} /></Grid>
-          <Grid item xs={12}><Typography><strong>Notes:</strong> {ticket.notes || 'No notes'}</Typography></Grid>
+          <Grid item xs={12}>
+              <Typography sx={{ mb: 1 }}><strong>Notes:</strong></Typography>
+              <NotesDisplay notes={ticket.notes} codeBlockBg={codeBlockBg} />
+            </Grid>
           {ticket.parts_needed && <Grid item xs={12}><Typography><strong>Parts:</strong> {ticket.parts_needed}</Typography></Grid>}
           {ticket.equipment_affected && <Grid item xs={12}><Typography><strong>Equipment:</strong> {ticket.equipment_affected}</Typography></Grid>}
         </Grid>
@@ -267,6 +319,7 @@ function CompactTicketDetail() {
           <Tabs value={tab} onChange={(e, v) => setTab(v)} sx={{ borderBottom: 1, borderColor: 'divider' }}>
             <Tab label={`Comments (${comments.length})`} sx={{ fontSize: '0.875rem', minHeight: 40 }} />
             <Tab label={`Time Entries (${timeEntries.length})`} sx={{ fontSize: '0.875rem', minHeight: 40 }} />
+            <Tab label={`Tasks (${tasks.length})`} sx={{ fontSize: '0.875rem', minHeight: 40 }} />
             <Tab label={`Shipments (${shipments.length})`} sx={{ fontSize: '0.875rem', minHeight: 40 }} />
           </Tabs>
 
@@ -276,7 +329,7 @@ function CompactTicketDetail() {
                 {comments.map((c) => (
                   <Paper key={c.comment_id} sx={{ p: 1, bgcolor: codeBlockBg }}>
                     <Typography variant="caption" fontWeight="bold">{c.user?.name || 'Unknown'}</Typography>
-                    <Typography variant="body2" sx={{ fontSize: '0.875rem' }}>{c.comment}</Typography>
+                    <Typography variant="body2" sx={{ fontSize: '0.875rem' }}>{sanitizeInput(c.comment)}</Typography>
                     <Typography variant="caption" color="text.secondary">{new Date(c.created_at).toLocaleString()}</Typography>
                   </Paper>
                 ))}
@@ -306,7 +359,7 @@ function CompactTicketDetail() {
                     <TableCell>{te.start_time ? new Date(te.start_time).toLocaleString() : 'N/A'}</TableCell>
                     <TableCell>{te.end_time ? new Date(te.end_time).toLocaleString() : 'N/A'}</TableCell>
                     <TableCell>{typeof te.duration_minutes === 'number' ? te.duration_minutes : (te.start_time && te.end_time ? Math.round((new Date(te.end_time)-new Date(te.start_time))/60000) : 0)}</TableCell>
-                    <TableCell>{te.description || ''}</TableCell>
+                    <TableCell>{sanitizeInput(te.description) || ''}</TableCell>
                     <TableCell>{te.user?.name || 'N/A'}</TableCell>
                   </TableRow>
                 ))}
@@ -316,6 +369,43 @@ function CompactTicketDetail() {
           )}
 
           {tab === 2 && (
+            <Box sx={{ mt: 2 }}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
+                <Typography variant="subtitle2" color="text.secondary">Tasks linked to this ticket</Typography>
+                <Button size="small" variant="outlined" startIcon={<Assignment />} onClick={() => navigate(`/tasks/new?ticket_id=${ticketId}`)}>New Task</Button>
+              </Stack>
+              {tasks.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">No tasks linked to this ticket.</Typography>
+              ) : (
+                <Table size="small" sx={{ '& td, & th': { py: 0.5, fontSize: '0.75rem' } }}>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Task ID</TableCell>
+                      <TableCell>Description</TableCell>
+                      <TableCell>Status</TableCell>
+                      <TableCell>Assigned</TableCell>
+                      <TableCell>Due</TableCell>
+                      <TableCell></TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {tasks.map((tk) => (
+                      <TableRow key={tk.task_id} hover sx={{ cursor: 'pointer' }} onClick={() => navigate(`/tasks/${tk.task_id}/edit`)}>
+                        <TableCell><Typography variant="caption" fontWeight="bold">{tk.task_id}</Typography></TableCell>
+                        <TableCell><Typography variant="body2" sx={{ fontSize: '0.8rem' }}>{tk.description?.slice(0, 60)}{(tk.description?.length || 0) > 60 ? '…' : ''}</Typography></TableCell>
+                        <TableCell><StatusChip status={tk.status} entityType="ticket" size="small" /></TableCell>
+                        <TableCell>{tk.assigned_user?.name || '—'}</TableCell>
+                        <TableCell>{tk.due_date ? new Date(tk.due_date).toLocaleDateString() : '—'}</TableCell>
+                        <TableCell><Button size="small" onClick={(e) => { e.stopPropagation(); navigate(`/tasks/${tk.task_id}/edit`); }}>Edit</Button></TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </Box>
+          )}
+
+          {tab === 3 && (
             <Box sx={{ mt: 2 }}>
               <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
                 <Typography variant="subtitle2">Shipments linked to ticket</Typography>

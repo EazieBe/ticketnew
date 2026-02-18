@@ -1,3 +1,14 @@
+/**
+ * Security utilities for input sanitization and validation.
+ *
+ * WHEN TO USE:
+ * - sanitizeHtml: When rendering user content that may contain HTML into innerHTML
+ *   or dangerouslySetInnerHTML. Escapes <, >, ", ', /, & to prevent XSS.
+ * - sanitizeInput: When displaying user text in plain text or form fields. Strips
+ *   angle brackets and removes javascript:/on* event handlers. Use for notes,
+ *   descriptions, comments shown as text.
+ * - sanitizeFormData: Use before submitting form data to sanitize all string fields.
+ */
 // Security utilities for input sanitization and validation
 
 // Sanitize HTML content to prevent XSS
@@ -35,8 +46,8 @@ export const validateEmail = (email) => {
 // Validate phone number format
 export const validatePhone = (phone) => {
   if (!phone) return false;
-  const phoneRegex = /^[\+]?[1-9][\d]{0,15}$/;
-  return phoneRegex.test(phone.replace(/[\s\-\(\)]/g, ''));
+  const phoneRegex = /^[+]?[1-9][\d]{0,15}$/;
+  return phoneRegex.test(phone.replace(/[\s\-()]/g, ''));
 };
 
 // Validate URL format

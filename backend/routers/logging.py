@@ -5,7 +5,6 @@ Logging and error tracking endpoints
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from database import get_db
-from utils.main_utils import get_current_user
 import models
 import schemas
 from datetime import datetime, timezone
@@ -23,8 +22,7 @@ logger = logging.getLogger(__name__)
 async def log_frontend_error(
     log_data: Dict[str, Any],
     request: Request,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """
     Receive and store frontend error logs
@@ -73,8 +71,7 @@ async def log_frontend_error(
 async def log_frontend_error_detailed(
     error_data: Dict[str, Any],
     request: Request,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """
     Receive and store detailed frontend error information
@@ -120,8 +117,7 @@ async def log_frontend_error_detailed(
 @router.get("/logs/stats")
 async def get_log_stats(
     hours: int = 24,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """
     Get logging statistics for the specified time period
@@ -182,8 +178,7 @@ async def get_recent_logs(
     limit: int = 100,
     level: Optional[str] = None,
     context: Optional[str] = None,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """
     Get recent log entries with optional filtering
@@ -223,8 +218,7 @@ async def get_recent_logs(
 @router.get("/errors/recent")
 async def get_recent_errors(
     limit: int = 50,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """
     Get recent error entries

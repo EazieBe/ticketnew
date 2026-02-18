@@ -24,10 +24,83 @@ def _normalize_ticket_dt(t: models.Ticket):
                 pass
     return t
 
+def _enforce_ticket_version(expected_version: Optional[int], current_version: int):
+    """Raise 409 when client writes with a stale version."""
+    if expected_version is None:
+        return
+    if expected_version != current_version:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Ticket was updated by another user. Refresh and retry.",
+                "current_ticket_version": current_version,
+                "expected_ticket_version": expected_version,
+            },
+        )
+
+def _bump_ticket_version(ticket: models.Ticket):
+    ticket.ticket_version = (ticket.ticket_version or 0) + 1
+
+def _canonicalize_status(requested: schemas.TicketStatus) -> schemas.TicketStatus:
+    """Normalize legacy statuses to lifecycle status contract."""
+    if requested == schemas.TicketStatus.archived:
+        return schemas.TicketStatus.archived
+    if requested in (schemas.TicketStatus.completed, schemas.TicketStatus.closed, schemas.TicketStatus.approved):
+        return schemas.TicketStatus.completed
+    return schemas.TicketStatus.open
+
+def _status_for_workflow_state(workflow_state: schemas.TicketWorkflowState) -> schemas.TicketStatus:
+    """Map operational workflow states to canonical lifecycle status."""
+    if workflow_state in {
+        schemas.TicketWorkflowState.pending_approval,
+        schemas.TicketWorkflowState.ready_to_archive,
+        schemas.TicketWorkflowState.nro_ready_for_completion,
+    }:
+        return schemas.TicketStatus.completed
+    return schemas.TicketStatus.open
+
+def _can_transition_workflow_state(
+    target_state: schemas.TicketWorkflowState,
+    role: models.UserRole,
+    is_assigned: bool,
+    is_claimer: bool,
+) -> bool:
+    is_admin_or_dispatcher = role in (models.UserRole.admin, models.UserRole.dispatcher)
+    is_worker = role == models.UserRole.tech or is_assigned or is_claimer
+
+    dispatcher_only_states = {
+        schemas.TicketWorkflowState.scheduled,
+        schemas.TicketWorkflowState.pending_dispatch_review,
+        schemas.TicketWorkflowState.nro_phase1_scheduled,
+        schemas.TicketWorkflowState.nro_phase2_scheduled,
+    }
+    worker_states = {
+        schemas.TicketWorkflowState.claimed,
+        schemas.TicketWorkflowState.onsite,
+        schemas.TicketWorkflowState.offsite,
+        schemas.TicketWorkflowState.followup_required,
+        schemas.TicketWorkflowState.needstech,
+        schemas.TicketWorkflowState.goback_required,
+        schemas.TicketWorkflowState.pending_approval,
+        schemas.TicketWorkflowState.nro_phase1_complete_pending_phase2,
+        schemas.TicketWorkflowState.nro_phase1_goback_required,
+        schemas.TicketWorkflowState.nro_phase2_goback_required,
+        schemas.TicketWorkflowState.nro_ready_for_completion,
+    }
+
+    if target_state in dispatcher_only_states:
+        return is_admin_or_dispatcher
+    if target_state == schemas.TicketWorkflowState.ready_to_archive:
+        return is_admin_or_dispatcher
+    if target_state in worker_states:
+        return is_admin_or_dispatcher or is_worker
+    return is_admin_or_dispatcher or is_worker
+
 @router.get("/count")
 def tickets_count(
     response: Response,
     status: Optional[str] = None,
+    workflow_state: Optional[str] = None,
     priority: Optional[str] = None,
     assigned_user_id: Optional[str] = None,
     site_id: Optional[str] = None,
@@ -39,6 +112,7 @@ def tickets_count(
     count = crud.count_tickets(
         db,
         status=status,
+        workflow_state=workflow_state,
         priority=priority,
         assigned_user_id=assigned_user_id,
         site_id=site_id,
@@ -84,6 +158,7 @@ def list_tickets(
     skip: int = 0,
     limit: int = 50,
     status: Optional[str] = None,
+    workflow_state: Optional[str] = None,
     priority: Optional[str] = None,
     assigned_user_id: Optional[str] = None,
     site_id: Optional[str] = None,
@@ -101,6 +176,7 @@ def list_tickets(
         skip=safe_skip,
         limit=safe_limit,
         status=status,
+        workflow_state=workflow_state,
         priority=priority,
         assigned_user_id=assigned_user_id,
         site_id=site_id,
@@ -109,6 +185,144 @@ def list_tickets(
         include_related=include_related,
     )
     return [_normalize_ticket_dt(t) for t in tickets]
+
+@router.post("/{ticket_id}/workflow-transition", response_model=schemas.TicketOut, tags=["ticket-workflow"])
+def workflow_transition(
+    ticket_id: str,
+    transition: schemas.WorkflowTransitionRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+    background_tasks: BackgroundTasks = None,
+):
+    """Transition ticket operational workflow state with role and version guards."""
+    ticket = crud.get_ticket(db, ticket_id=ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    role = _as_role(current_user.role)
+    is_admin_or_dispatcher = role in (models.UserRole.admin, models.UserRole.dispatcher)
+    is_assigned = ticket.assigned_user_id == current_user.user_id
+    is_claimer = getattr(ticket, "claimed_by", None) == current_user.user_id
+    if not _can_transition_workflow_state(transition.workflow_state, role, is_assigned, is_claimer):
+        raise HTTPException(status_code=403, detail="Not authorized for this workflow transition")
+
+    _enforce_ticket_version(transition.expected_ticket_version, ticket.ticket_version or 1)
+
+    effective_type = transition.convert_to_type.value if transition.convert_to_type is not None else (ticket.type.value if hasattr(ticket.type, "value") else ticket.type)
+    if transition.workflow_state.value.startswith("nro_") and effective_type != models.TicketType.nro.value:
+        raise HTTPException(status_code=400, detail="NRO phase transitions require ticket type 'nro'")
+
+    ticket.workflow_state = transition.workflow_state.value
+    ticket.status = _status_for_workflow_state(transition.workflow_state).value
+    ticket.last_updated_by = current_user.user_id
+    ticket.last_updated_at = datetime.now(timezone.utc)
+    if transition.convert_to_type is not None:
+        if not is_admin_or_dispatcher:
+            raise HTTPException(status_code=403, detail="Only dispatcher/admin can convert ticket type")
+        ticket.type = transition.convert_to_type.value
+
+    if transition.schedule_date is not None:
+        ticket.date_scheduled = transition.schedule_date
+    if transition.follow_up_date is not None:
+        ticket.follow_up_required = True
+        ticket.follow_up_date = transition.follow_up_date
+    if transition.follow_up_notes is not None:
+        ticket.follow_up_notes = transition.follow_up_notes
+    if transition.notes:
+        base = ticket.notes or ""
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        note_line = f"[WORKFLOW:{transition.workflow_state.value}] {stamp} - {transition.notes}"
+        ticket.notes = f"{base}\n{note_line}".strip()
+
+    # NRO phase-specific field synchronization
+    if transition.workflow_state == schemas.TicketWorkflowState.nro_phase1_scheduled:
+        if transition.schedule_date is None:
+            raise HTTPException(status_code=400, detail="schedule_date is required for nro_phase1_scheduled")
+        ticket.nro_phase1_scheduled_date = transition.schedule_date
+        ticket.nro_phase1_state = "scheduled"
+    elif transition.workflow_state == schemas.TicketWorkflowState.nro_phase1_complete_pending_phase2:
+        ticket.nro_phase1_completed_at = datetime.now(timezone.utc)
+        ticket.nro_phase1_state = "completed"
+    elif transition.workflow_state == schemas.TicketWorkflowState.nro_phase1_goback_required:
+        ticket.nro_phase1_state = "goback_required"
+    elif transition.workflow_state == schemas.TicketWorkflowState.nro_phase2_scheduled:
+        if transition.schedule_date is None:
+            raise HTTPException(status_code=400, detail="schedule_date is required for nro_phase2_scheduled")
+        ticket.nro_phase2_scheduled_date = transition.schedule_date
+        ticket.nro_phase2_state = "scheduled"
+    elif transition.workflow_state == schemas.TicketWorkflowState.nro_phase2_goback_required:
+        ticket.nro_phase2_state = "goback_required"
+    elif transition.workflow_state == schemas.TicketWorkflowState.nro_ready_for_completion:
+        if ticket.nro_phase1_completed_at is None:
+            raise HTTPException(status_code=400, detail="Phase 1 must be completed before marking NRO ready for completion")
+        ticket.nro_phase2_completed_at = datetime.now(timezone.utc)
+        ticket.nro_phase2_state = "completed"
+
+    _bump_ticket_version(ticket)
+    db.commit()
+    db.refresh(ticket)
+
+    audit_log(
+        db,
+        current_user.user_id,
+        "workflow_state",
+        None,
+        transition.workflow_state.value,
+        ticket_id,
+    )
+
+    if background_tasks:
+        _enqueue_broadcast(background_tasks, '{"type":"ticket","action":"workflow_transition"}')
+
+    return _normalize_ticket_dt(ticket)
+
+@router.get("/dispatch/queue", response_model=List[schemas.TicketOut], tags=["ticket-workflow"])
+def dispatcher_queue(
+    queue: str = "all",
+    skip: int = 0,
+    limit: int = 200,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role([models.UserRole.admin.value, models.UserRole.dispatcher.value])),
+):
+    """
+    Dispatcher queue buckets:
+    - approval: pending approval tickets
+    - needstech: inhouse escalations requiring dispatcher conversion/scheduling
+    - goback: tickets requiring go-back scheduling
+    - returns: open tickets with follow-up required (temporary expected-returns queue)
+    - all: union of above
+    """
+    safe_skip = max(0, skip)
+    safe_limit = max(1, min(limit, 500))
+    queue_map = {
+        "approval": [
+            models.TicketWorkflowState.pending_approval.value,
+            models.TicketWorkflowState.nro_ready_for_completion.value,
+        ],
+        "needstech": [
+            models.TicketWorkflowState.needstech.value,
+            models.TicketWorkflowState.nro_phase1_complete_pending_phase2.value,
+        ],
+        "goback": [
+            models.TicketWorkflowState.goback_required.value,
+            models.TicketWorkflowState.nro_phase1_goback_required.value,
+            models.TicketWorkflowState.nro_phase2_goback_required.value,
+        ],
+        "returns": [models.TicketWorkflowState.followup_required.value],
+    }
+    selected_states: List[str]
+    if queue == "all":
+        selected_states = []
+        for arr in queue_map.values():
+            selected_states.extend(arr)
+    elif queue in queue_map:
+        selected_states = queue_map[queue]
+    else:
+        raise HTTPException(status_code=400, detail="Invalid queue value")
+
+    query = db.query(models.Ticket).filter(models.Ticket.workflow_state.in_(selected_states)).order_by(models.Ticket.date_scheduled.asc().nullsfirst(), models.Ticket.created_at.desc())
+    items = query.offset(safe_skip).limit(safe_limit).all()
+    return [_normalize_ticket_dt(t) for t in items]
 
 @router.get("/{ticket_id}", response_model=schemas.TicketOut)
 def get_ticket(
@@ -143,17 +357,20 @@ def update_ticket(
     if not (is_admin_or_dispatcher or is_assigned or is_claimer):
         raise HTTPException(status_code=403, detail="Not authorized to update this ticket")
 
+    _enforce_ticket_version(ticket.expected_ticket_version, prev_ticket.ticket_version or 1)
+
     if ticket.status is not None:
         requested = _as_ticket_status(ticket.status)
         prev = _as_ticket_status(prev_ticket.status)
-        new_status = requested
-        if requested == schemas.TicketStatus.closed and _as_role(current_user.role) not in (models.UserRole.admin, models.UserRole.dispatcher):
-            new_status = schemas.TicketStatus.pending
+        new_status = _canonicalize_status(requested)
+        if requested == schemas.TicketStatus.archived and _as_role(current_user.role) not in (models.UserRole.admin, models.UserRole.dispatcher):
+            new_status = schemas.TicketStatus.completed
         ticket.status = new_status.value  # store value consistently as string
 
     # metadata
     ticket.last_updated_by = current_user.user_id
     ticket.last_updated_at = datetime.now(timezone.utc)
+    ticket.ticket_version = (prev_ticket.ticket_version or 1) + 1
     
     try:
         crud.update_ticket(db, ticket_id=ticket_id, ticket=ticket)
@@ -187,12 +404,15 @@ def update_ticket_status(
     # Handle status change logic
     requested = _as_ticket_status(status_update.status)
     is_admin_or_dispatcher = _as_role(current_user.role) in (models.UserRole.admin, models.UserRole.dispatcher)
-    new_status = requested if not (requested == schemas.TicketStatus.closed and not is_admin_or_dispatcher) else schemas.TicketStatus.pending
+    new_status = _canonicalize_status(requested)
+    if requested == schemas.TicketStatus.archived and not is_admin_or_dispatcher:
+        new_status = schemas.TicketStatus.completed
 
     ticket_update = schemas.TicketUpdate(
         status=new_status.value,
         last_updated_by=current_user.user_id,
         last_updated_at=datetime.now(timezone.utc),
+        ticket_version=(prev_ticket.ticket_version or 1) + 1,
     )
     
     try:
@@ -226,9 +446,11 @@ def approve_ticket(
 
     from datetime import datetime, timezone
     prev_status = _as_ticket_status(ticket.status)
-    ticket.status = (schemas.TicketStatus.archived if approve else schemas.TicketStatus.in_progress).value
+    ticket.status = (schemas.TicketStatus.archived if approve else schemas.TicketStatus.open).value
+    ticket.workflow_state = (models.TicketWorkflowState.ready_to_archive.value if approve else models.TicketWorkflowState.pending_dispatch_review.value)
     ticket.approved_by = current_user.user_id if approve else None
     ticket.approved_at = datetime.now(timezone.utc) if approve else None
+    _bump_ticket_version(ticket)
     db.commit()
     db.refresh(ticket)
     # Audit log
@@ -254,10 +476,12 @@ def claim_ticket(
     ticket.claimed_by = claim_data.get('claimed_by', current_user.user_id)
     ticket.claimed_at = datetime.now(timezone.utc)
     ticket.assigned_user_id = current_user.user_id  # Auto-assign to claimer
+    ticket.workflow_state = models.TicketWorkflowState.claimed.value
     # Start timer on claim if not already started
     if not getattr(ticket, 'start_time', None):
         ticket.start_time = datetime.now(timezone.utc)
-    ticket.status = models.TicketStatus.in_progress.value
+    ticket.status = models.TicketStatus.open.value
+    _bump_ticket_version(ticket)
     
     db.commit()
     db.refresh(ticket)
@@ -307,6 +531,8 @@ def complete_ticket(
 
     prev_status = ticket.status
     ticket.status = models.TicketStatus.completed.value
+    ticket.workflow_state = models.TicketWorkflowState.pending_approval.value
+    _bump_ticket_version(ticket)
 
     db.commit()
     db.refresh(ticket)
@@ -351,7 +577,9 @@ def check_in_ticket(
     # Update ticket with check-in info
     from datetime import datetime, timezone
     ticket.check_in_time = datetime.now(timezone.utc)
-    ticket.status = models.TicketStatus.checked_in.value
+    ticket.status = models.TicketStatus.open.value
+    ticket.workflow_state = models.TicketWorkflowState.onsite.value
+    _bump_ticket_version(ticket)
     
     db.commit()
     db.refresh(ticket)
@@ -395,7 +623,9 @@ def check_out_ticket(
         # Also set time_spent so it displays in the frontend
         ticket.time_spent = duration_minutes
     
-    ticket.status = models.TicketStatus.completed.value
+    ticket.status = models.TicketStatus.open.value
+    ticket.workflow_state = models.TicketWorkflowState.offsite.value
+    _bump_ticket_version(ticket)
     
     db.commit()
     db.refresh(ticket)

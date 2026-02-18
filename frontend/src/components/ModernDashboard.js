@@ -1,1286 +1,576 @@
-import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Box, Typography, Paper, Grid, Card, CardContent, CardActions, Button,
-  Chip, IconButton, Avatar, LinearProgress, Stack, Divider, Tooltip,
-  Badge, Switch, FormControlLabel, Dialog, DialogTitle, DialogContent,
-  DialogActions, List, ListItem, ListItemText, ListItemIcon, ListItemSecondaryAction,
-  useTheme, useMediaQuery, Fade, Zoom, Skeleton, Tabs, Tab, Table, TableBody,
-  TableCell, TableContainer, TableHead, TableRow, Checkbox, FormControl, Select, MenuItem
+  Box, Typography, Paper, Grid, Card, CardContent, Button, Chip, IconButton,
+  Stack, useTheme, Tabs, Tab, TextField, InputAdornment,
+  Tooltip, Skeleton, Link
 } from '@mui/material';
 import {
-  Assignment, LocalShipping, Person, Business, CheckCircle, Warning,
-  Schedule, TrendingUp, TrendingDown, Refresh, Settings, Visibility,
-  PlayArrow, Pause, Stop, Add, MoreVert, Dashboard as DashboardIcon,
-  Inventory, Task, Notifications, Wifi, WifiOff, Speed, Analytics,
-  Timeline, Assessment, Star, StarBorder, ExpandMore, ExpandLess
+  Assignment, LocalShipping, Task, Add, Refresh, ChevronLeft, ChevronRight,
+  CalendarMonth, ViewDay, Schedule, CheckCircle, Inventory, EventBusy,
+  LocationOn, Home as HomeIcon, Build, Business, Assessment, Map as MapIcon, OpenInNew
 } from '@mui/icons-material';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
+  ResponsiveContainer, PieChart, Pie, Cell
+} from 'recharts';
+import dayjs from 'dayjs';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../AuthContext';
 import useApi from '../hooks/useApi';
 import useThemeTokens from '../hooks/useThemeTokens';
 import StatusChip from './StatusChip';
 import PriorityChip from './PriorityChip';
+import TypeChip from './TypeChip';
 import { useDataSync } from '../contexts/DataSyncContext';
 import { useNotifications } from '../contexts/NotificationProvider';
 
-// Helpers
-const toDateOnly = (iso) => (iso ? new Date(iso) : null);
-const isWithin = (date, start, end) => {
-  if (!date) return false;
-  const t = date.getTime();
-  return t >= start.getTime() && t < end.getTime();
-};
-const percentChange = (currentCount, previousCount) => {
-  if (previousCount === 0) return currentCount > 0 ? 100 : 0;
-  return ((currentCount - previousCount) / previousCount) * 100;
+const COLORS = {
+  overdue: '#d32f2f',
+  due: '#1976d2',
+  upcoming: '#2e7d32',
+  emergency: '#b71c1c',
+  critical: '#e65100',
+  normal: '#2e7d32'
 };
 
-// Widget Components
-const StatCard = ({ title, value, change, icon, color, trend, onClick, loading, compact = false, tooltip }) => {
-  const theme = useTheme();
-  const isDark = theme.palette.mode === 'dark';
-  
-  return (
-    <Zoom in={true} timeout={300}>
-      <Card 
-        sx={{ 
-          height: '100%', 
-          cursor: onClick ? 'pointer' : 'default',
-          transition: 'all 0.3s ease',
-          '&:hover': onClick ? { 
-            transform: 'translateY(-2px)', 
-            boxShadow: theme.shadows[6] 
-          } : {},
-          background: isDark 
-            ? 'linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%)'
-            : 'linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%)',
-          border: `1px solid ${theme.palette.divider}`,
-          position: 'relative',
-          overflow: 'hidden',
-          p: compact ? 0.5 : 0
-        }}
-        onClick={onClick}
-      >
-        {loading ? (
-          <CardContent sx={{ p: compact ? 1 : 2 }}>
-            <Skeleton variant="rectangular" height={compact ? 28 : 40} />
-            <Skeleton variant="text" sx={{ mt: 1 }} />
-          </CardContent>
-        ) : (
-          <>
-            <CardContent sx={{ p: compact ? 1.25 : 2, position: 'relative' }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: compact ? 0.5 : 1 }}>
-                <Box>
-                  <Typography variant="h5" fontWeight="bold" color={color} sx={{ mb: 0.25, fontSize: compact ? '1.1rem' : '1.5rem' }}>
-                    {value}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ fontSize: compact ? '0.65rem' : '0.75rem' }}>
-                    {title}
-                  </Typography>
-                </Box>
-                <Avatar sx={{ bgcolor: color, width: compact ? 28 : 36, height: compact ? 28 : 36 }}>
-                  {icon}
-                </Avatar>
-              </Box>
-              
-              {change !== undefined && (
-                <Tooltip title={tooltip || ''} disableInteractive>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    {trend === 'up' ? (
-                      <TrendingUp color="success" fontSize="small" />
-                    ) : trend === 'down' ? (
-                      <TrendingDown color="error" fontSize="small" />
-                    ) : null}
-                    <Typography 
-                      variant="body2" 
-                      color={trend === 'up' ? 'success.main' : trend === 'down' ? 'error.main' : 'text.secondary'}
-                      sx={{ fontSize: compact ? '0.6rem' : '0.7rem', fontWeight: 600 }}
-                    >
-                      {change > 0 ? '+' : ''}{change}%
-                    </Typography>
-                  </Box>
-                </Tooltip>
-              )}
-            </CardContent>
-            
-            {/* Decorative element */}
-            <Box
-              sx={{
-                position: 'absolute',
-                top: 0,
-                right: 0,
-                width: compact ? 48 : 60,
-                height: compact ? 48 : 60,
-                background: `linear-gradient(45deg, ${color}20, transparent)`,
-                borderRadius: '0 0 0 100%',
-                opacity: 0.1
-              }}
-            />
-          </>
-        )}
-      </Card>
-    </Zoom>
-  );
-};
+function TicketCard({ ticket, variant = 'normal', onClick }) {
+  const isOverdue = variant === 'overdue';
+  const isUrgent = ticket?.priority === 'emergency' || ticket?.priority === 'critical';
+  const borderColor = isOverdue ? COLORS.overdue : isUrgent ? COLORS[ticket.priority] : COLORS.due;
 
-const QuickActionCard = ({ title, description, icon, color, onClick, badge, compact = false }) => {
-  const theme = useTheme();
-  const isDark = theme.palette.mode === 'dark';
-  
   return (
-    <Fade in={true} timeout={500}>
-      <Card
-        sx={{
-          height: '100%',
-          cursor: 'pointer',
-          transition: 'all 0.3s ease',
-          '&:hover': {
-            transform: 'translateY(-2px)',
-            boxShadow: theme.shadows[6]
-          },
-          background: isDark 
-            ? 'linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%)'
-            : 'linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%)',
-          border: `1px solid ${theme.palette.divider}`,
-          position: 'relative'
-        }}
-        onClick={onClick}
-      >
-        <CardContent sx={{ p: compact ? 1 : 1.5, textAlign: 'center' }}>
-          <Badge badgeContent={badge} color="error" invisible={!badge}>
-            <Avatar sx={{ bgcolor: color, width: compact ? 28 : 40, height: compact ? 28 : 40, mx: 'auto', mb: compact ? 0.5 : 1 }}>
-              {icon}
-            </Avatar>
-          </Badge>
-          <Typography variant="body1" fontWeight="bold" sx={{ mb: compact ? 0.25 : 0.5, fontSize: compact ? '0.8rem' : '0.875rem' }}>
-            {title}
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ fontSize: compact ? '0.6rem' : '0.7rem' }}>
-            {description}
-          </Typography>
-        </CardContent>
-      </Card>
-    </Fade>
-  );
-};
-
-const RecentActivityCard = ({ title, activities, loading, onViewAll }) => {
-  const theme = useTheme();
-  const isDark = theme.palette.mode === 'dark';
-  
-  return (
-    <Card
+    <Paper
+      elevation={0}
       sx={{
-        height: '100%',
-        background: isDark 
-          ? 'linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%)'
-          : 'linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%)',
-        border: `1px solid ${theme.palette.divider}`,
-        position: 'relative'
+        p: 1.5,
+        borderLeft: `4px solid ${borderColor}`,
+        cursor: 'pointer',
+        '&:hover': { bgcolor: 'action.hover' }
       }}
+      onClick={() => onClick?.(ticket?.ticket_id)}
     >
-      <CardContent sx={{ p: 3 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h6" fontWeight="bold">
-            {title}
+      <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+            <Typography variant="body2" fontWeight="bold" sx={{ fontSize: '0.875rem' }}>
+              {ticket?.ticket_id}
+            </Typography>
+            <TypeChip type={ticket?.type} size="small" sx={{ height: 20 }} />
+            <PriorityChip priority={ticket?.priority} size="small" sx={{ height: 20 }} />
+            <StatusChip status={ticket?.status} entityType="ticket" size="small" sx={{ height: 20 }} />
+          </Stack>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+            {ticket?.site?.location || ticket?.site_id} • {ticket?.assigned_user?.name || 'Unassigned'}
           </Typography>
-          <Button size="small" onClick={onViewAll} endIcon={<Visibility />}>
-            View All
-          </Button>
         </Box>
-        
-        {loading ? (
-          <Box>
-            {[1, 2, 3, 4].map((i) => (
-              <Box key={i} sx={{ mb: 2 }}>
-                <Skeleton variant="rectangular" height={40} />
-              </Box>
-            ))}
-          </Box>
-        ) : (
-          <List dense>
-            {activities.slice(0, 5).map((activity, index) => (
-              <ListItem key={index} sx={{ px: 0 }}>
-                <ListItemIcon>
-                  <Avatar sx={{ width: 32, height: 32, bgcolor: activity.color }}>
-                    {activity.icon}
-                  </Avatar>
-                </ListItemIcon>
-                <ListItemText
-                  primary={
-                    <Typography variant="body2" fontWeight="medium">
-                      {activity.title}
-                    </Typography>
-                  }
-                  secondary={
-                    <Typography variant="caption" color="text.secondary">
-                      {activity.time}
-                    </Typography>
-                  }
-                />
-                <ListItemSecondaryAction>
-                  <Chip 
-                    label={activity.status} 
-                    size="small" 
-                    color={activity.statusColor}
-                    sx={{ fontSize: '0.65rem' }}
-                  />
-                </ListItemSecondaryAction>
-              </ListItem>
-            ))}
-          </List>
-        )}
-      </CardContent>
-    </Card>
+      </Stack>
+    </Paper>
   );
-};
+}
 
-const PerformanceChart = ({ title, data, loading }) => {
-  const theme = useTheme();
-  const isDark = theme.palette.mode === 'dark';
-  
-  return (
-    <Card
-      sx={{
-        height: '100%',
-        background: isDark 
-          ? 'linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%)'
-          : 'linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%)',
-        border: `1px solid ${theme.palette.divider}`,
-        position: 'relative'
-      }}
-    >
-      <CardContent sx={{ p: 3 }}>
-        <Typography variant="h6" fontWeight="bold" sx={{ mb: 3 }}>
-          {title}
-        </Typography>
-        
-        {loading ? (
-          <Box>
-            <Skeleton variant="rectangular" height={200} />
-          </Box>
-        ) : (
-          <Box sx={{ height: 200, display: 'flex', alignItems: 'end', gap: 1 }}>
-            {data.map((item, index) => (
-              <Box key={index} sx={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                <Box
-                  sx={{
-                    width: '100%',
-                    height: `${item.value}%`,
-                    background: `linear-gradient(180deg, ${item.color} 0%, ${item.color}80 100%)`,
-                    borderRadius: '4px 4px 0 0',
-                    minHeight: 20,
-                    transition: 'all 0.3s ease',
-                    '&:hover': {
-                      transform: 'scaleY(1.05)',
-                      boxShadow: `0 4px 8px ${item.color}40`
-                    }
-                  }}
-                />
-                <Typography variant="caption" sx={{ mt: 1, fontSize: '0.7rem' }}>
-                  {item.label}
-                </Typography>
-              </Box>
-            ))}
-          </Box>
-        )}
-      </CardContent>
-    </Card>
-  );
-};
-
-const Clock = memo(() => {
-  const [now, setNow] = useState(new Date());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-  return <>{now.toLocaleTimeString()}</>;
-});
+const TICKET_TYPES = [
+  { key: 'all', label: 'All', icon: <Assignment /> },
+  { key: 'onsite', label: 'Onsite', icon: <LocationOn /> },
+  { key: 'inhouse', label: 'Inhouse', icon: <HomeIcon /> },
+  { key: 'projects', label: 'Projects', icon: <Build /> },
+  { key: 'misc', label: 'Misc', icon: <Assignment /> }
+];
 
 function ModernDashboard() {
   const navigate = useNavigate();
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
-  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const { tableHeaderBg, rowHoverBg, divider } = useThemeTokens();
-  
-  const { user } = useAuth();
   const { get } = useApi();
-  const { success, error: showError } = useToast();
+  const { error: showError } = useToast();
+  const { user } = useAuth();
   const { updateTrigger } = useDataSync('tickets');
   const { isConnected } = useNotifications();
-  
-  const [loading, setLoading] = useState(true);
+
+  const [viewMode, setViewMode] = useState('day'); // 'day' | 'calendar'
+  const [typeFilter, setTypeFilter] = useState('all'); // all | onsite | inhouse | projects | misc
+  const [selectedDate, setSelectedDate] = useState(dayjs().format('YYYY-MM-DD'));
   const [tickets, setTickets] = useState([]);
-  const [shipments, setShipments] = useState([]);
+  const [allTickets, setAllTickets] = useState([]); // For calendar counts & charts
   const [tasks, setTasks] = useState([]);
-  const [inventory, setInventory] = useState([]);
-  const [widgetSettings, setWidgetSettings] = useState({
-    showTickets: true,
-    showShipments: true,
-    showTasks: true,
-    showInventory: true,
-    showPerformance: true,
-    showActivity: true,
-    showCalendar: true,
-    showTimeline: true,
-    compactCards: true,
-    kpiTrendWindowDays: 7,
-    calendarItemsPerDay: 5,
-    timelineLimit: 50,
-    calendarDays: 14,
-    timelineDays: 14,
-    densityPreset: 'compact', // 'comfortable' | 'compact' | 'ultra'
-    showKpiActiveTickets: true,
-    showKpiPendingShipments: true,
-    showKpiActiveTasks: true,
-    showKpiLowStock: true
-  });
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState(0);
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [selectedTickets, setSelectedTickets] = useState(new Set());
-  const [calendarDialog, setCalendarDialog] = useState({ open: false, date: null, tickets: [] });
+  const [shipments, setShipments] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  // Clock moved to isolated component to avoid re-rendering the whole dashboard each second
-
-  // Load/save dashboard settings
-  useEffect(() => {
+  const fetchDailyTickets = useCallback(async () => {
     try {
-      const raw = localStorage.getItem('dashboardSettings');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        setWidgetSettings((prev) => ({ ...prev, ...parsed }));
-      }
-    } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  useEffect(() => {
-    try {
-      localStorage.setItem('dashboardSettings', JSON.stringify(widgetSettings));
-    } catch {}
-  }, [widgetSettings]);
+      const data = await get(`/tickets/daily/${selectedDate}`);
+      setTickets(data || []);
+    } catch {
+      setTickets([]);
+      showError('Failed to load daily tickets');
+    }
+  }, [get, selectedDate, showError]);
 
-  const fetchData = useCallback(async () => {
+  const fetchAllData = useCallback(async () => {
     try {
       setLoading(true);
-      const [ticketsRes, shipmentsRes, tasksRes, inventoryRes] = await Promise.all([
-        get('/tickets/'),
-        get('/shipments/'),
-        get('/tasks/'),
-        get('/inventory/')
+      const [tRes, allTRes, tasksRes, shipRes] = await Promise.all([
+        get(`/tickets/daily/${selectedDate}`),
+        get('/tickets/?limit=200'),
+        get('/tasks/').catch(() => []),
+        get('/shipments/').catch(() => [])
       ]);
-      
-      setTickets(ticketsRes || []);
-      setShipments(shipmentsRes || []);
+      setTickets(tRes || []);
+      setAllTickets(allTRes || []);
       setTasks(tasksRes || []);
-      setInventory(inventoryRes || []);
-    } catch (err) {
-      showError('Failed to load dashboard data');
+      setShipments(shipRes || []);
+    } catch {
+      showError('Failed to load dashboard');
     } finally {
       setLoading(false);
     }
-  }, [get, showError]);
+  }, [get, selectedDate, showError]);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData, updateTrigger]);
+    fetchAllData();
+  }, [fetchAllData, updateTrigger]);
 
-  const stats = useMemo(() => {
-    // Match backend logic: exclude completed, closed, approved, and archived
-    const activeTickets = tickets.filter(t => !['completed', 'closed', 'approved', 'archived'].includes(t.status));
-    const pendingShipments = shipments.filter(s => s.status === 'pending');
-    const activeTasks = tasks.filter(t => t.status === 'active');
-    const lowStockItems = inventory.filter(i => i.quantity < 10);
-    
+  // Categorize tickets for selected day
+  const { overdue, dueToday, upcoming } = useMemo(() => {
+    const today = selectedDate;
+    const active = tickets.filter(t => !['completed', 'closed', 'approved', 'archived'].includes(t.status || ''));
+    const byType = typeFilter === 'all' ? active : active.filter(t => (t.type || '') === typeFilter);
     return {
-      totalTickets: activeTickets.length,
-      completedTickets: tickets.filter(t => t.status === 'completed').length,
-      pendingShipments: pendingShipments.length,
-      activeTasks: activeTasks.length,
-      lowStockItems: lowStockItems.length,
-      overdueTickets: tickets.filter(t => {
-        const scheduled = t.date_scheduled || t.date_created;
-        return scheduled < new Date().toISOString().split('T')[0] && 
-               !['completed', 'closed', 'archived'].includes(t.status);
-      }).length
+      overdue: byType.filter(t => {
+        const d = t.date_scheduled || t.date_created;
+        return d && String(d) < today;
+      }).sort((a, b) => {
+        const pa = { emergency: 3, critical: 2, normal: 1 }[a.priority] || 0;
+        const pb = { emergency: 3, critical: 2, normal: 1 }[b.priority] || 0;
+        return pa !== pb ? pa - pb : (a.date_scheduled || '').localeCompare(b.date_scheduled || '');
+      }),
+      dueToday: byType.filter(t => {
+        const d = t.date_scheduled || t.date_created;
+        return d === today;
+      }).sort((a, b) => {
+        const pa = { emergency: 3, critical: 2, normal: 1 }[a.priority] || 0;
+        const pb = { emergency: 3, critical: 2, normal: 1 }[b.priority] || 0;
+        return pb - pa;
+      }),
+      upcoming: byType
+        .filter(t => {
+          const d = t.date_scheduled || t.date_created;
+          return d && String(d) > today;
+        })
+        .slice(0, 10)
+        .sort((a, b) => {
+          const da = String(a.date_scheduled || a.date_created || '');
+          const db = String(b.date_scheduled || b.date_created || '');
+          return da.localeCompare(db);
+        })
     };
-  }, [tickets, shipments, tasks, inventory]);
+  }, [tickets, selectedDate, typeFilter]);
 
-  // KPI trends: compare current period vs previous period using created dates
-  const kpiTrends = useMemo(() => {
-    const days = Number(widgetSettings.kpiTrendWindowDays) || 7;
-    const now = new Date();
-    const startCurrent = new Date(now);
-    startCurrent.setDate(now.getDate() - days);
-    const startPrevious = new Date(now);
-    startPrevious.setDate(now.getDate() - days * 2);
-
-    const endPrevious = startCurrent;
-    const endCurrent = now;
-
-    const inCurrent = (d) => isWithin(toDateOnly(d), startCurrent, endCurrent);
-    const inPrevious = (d) => isWithin(toDateOnly(d), startPrevious, endPrevious);
-
-    // Active tickets (match backend logic: exclude completed, closed, approved, and archived)
-    const isActiveTicket = (t) => !['completed', 'closed', 'approved', 'archived'].includes(t.status);
-    const activeCurrent = tickets.filter((t) => isActiveTicket(t) && inCurrent(t.date_created)).length;
-    const activePrevious = tickets.filter((t) => isActiveTicket(t) && inPrevious(t.date_created)).length;
-    const activePct = Number(percentChange(activeCurrent, activePrevious).toFixed(1));
-
-    // Pending shipments created in period
-    const isPendingShipment = (s) => s.status === 'pending';
-    const pendShipCurrent = shipments.filter((s) => isPendingShipment(s) && inCurrent(s.date_created)).length;
-    const pendShipPrevious = shipments.filter((s) => isPendingShipment(s) && inPrevious(s.date_created)).length;
-    const pendShipPct = Number(percentChange(pendShipCurrent, pendShipPrevious).toFixed(1));
-
-    // Active tasks created in period (if date_created exists)
-    const isActiveTask = (t) => t.status === 'active';
-    const activeTaskCurrent = tasks.filter((t) => isActiveTask(t) && t.date_created && inCurrent(t.date_created)).length;
-    const activeTaskPrevious = tasks.filter((t) => isActiveTask(t) && t.date_created && inPrevious(t.date_created)).length;
-    const activeTaskPct = Number(percentChange(activeTaskCurrent, activeTaskPrevious).toFixed(1));
-
-    // Low stock: insufficient historical signals — keep neutral
-    const lowStockPct = 0;
-
-    const dir = (v) => (v > 0 ? 'up' : v < 0 ? 'down' : 'neutral');
-    const windowLabel = `${days}d vs prior ${days}d`;
-
-    return {
-      activeTickets: { change: activePct, trend: dir(activePct), tooltip: `New active tickets ${windowLabel}` },
-      pendingShipments: { change: pendShipPct, trend: dir(pendShipPct), tooltip: `New pending shipments ${windowLabel}` },
-      activeTasks: { change: activeTaskPct, trend: dir(activeTaskPct), tooltip: `New active tasks ${windowLabel}` },
-      lowStockItems: { change: lowStockPct, trend: 'neutral', tooltip: 'Low stock trend not tracked' }
-    };
-  }, [tickets, shipments, tasks, widgetSettings.kpiTrendWindowDays]);
-
-  // Density helpers
-  const density = widgetSettings.densityPreset;
-  const densitySpacing = density === 'ultra' ? 1 : density === 'compact' ? 2 : 3;
-  const kpiMdCols = density === 'comfortable' ? 3 : 2;
-
-  const recentActivities = useMemo(() => {
-    const activities = [];
-    
-    // Recent tickets
-    tickets.slice(0, 3).forEach(ticket => {
-      activities.push({
-        title: `Ticket ${ticket.ticket_id} - ${ticket.status}`,
-        time: new Date(ticket.date_created).toLocaleString(),
-        icon: <Assignment />,
-        color: '#1976d2',
-        status: ticket.status,
-        statusColor: ticket.status === 'completed' ? 'success' : 'primary'
-      });
+  // Chart: Status breakdown (from all active tickets)
+  const statusChartData = useMemo(() => {
+    const active = allTickets.filter(t => !['completed', 'closed', 'approved', 'archived'].includes(t.status || ''));
+    const counts = {};
+    active.forEach(t => {
+      const s = t.status || 'open';
+      counts[s] = (counts[s] || 0) + 1;
     });
-    
-    // Recent shipments
-    shipments.slice(0, 2).forEach(shipment => {
-      activities.push({
-        title: `Shipment ${shipment.shipment_id} - ${shipment.status}`,
-        time: new Date(shipment.date_created).toLocaleString(),
-        icon: <LocalShipping />,
-        color: '#ff9800',
-        status: shipment.status,
-        statusColor: shipment.status === 'delivered' ? 'success' : 'warning'
-      });
-    });
-    
-    return activities.sort((a, b) => new Date(b.time) - new Date(a.time));
-  }, [tickets, shipments]);
+    return Object.entries(counts).map(([name, value]) => ({
+      name: name.replace(/_/g, ' '),
+      value,
+      fill: name === 'needs_parts' ? '#e65100' : name === 'in_progress' ? '#1976d2' : name === 'checked_in' ? '#ff9800' : '#666'
+    }));
+  }, [allTickets]);
 
-  const performanceData = useMemo(() => {
-    const last7Days = Array.from({ length: 7 }, (_, i) => {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      return date.toISOString().split('T')[0];
-    }).reverse();
-    
-    return last7Days.map(date => {
-      const dayTickets = tickets.filter(t => t.date_created?.startsWith(date));
-      const completedTickets = dayTickets.filter(t => t.status === 'completed');
-      
-      return {
-        label: new Date(date).toLocaleDateString('en-US', { weekday: 'short' }),
-        value: Math.max(20, (completedTickets.length / Math.max(1, dayTickets.length)) * 100),
-        color: '#4caf50'
-      };
+  // Chart: Completed last 7 days
+  const completionChartData = useMemo(() => {
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = dayjs().subtract(6 - i, 'day');
+      const dateStr = d.format('YYYY-MM-DD');
+      const completed = allTickets.filter(t => {
+        if (t.status !== 'completed' && t.status !== 'closed' && t.status !== 'approved') return false;
+        const closed = t.date_closed || (t.end_time && t.end_time.toString().slice(0, 10));
+        return closed && closed.toString().startsWith(dateStr);
+      }).length;
+      return { day: d.format('ddd'), completed, date: dateStr };
     });
-  }, [tickets]);
+  }, [allTickets]);
 
-  const filteredTickets = useMemo(() => {
-    let filtered = tickets.filter(t => !['archived'].includes(t.status));
-    if (statusFilter === 'active') {
-      // Match backend logic: exclude completed, closed, approved, and archived
-      filtered = filtered.filter(t => !['completed', 'closed', 'approved', 'archived'].includes(t.status));
-    } else if (statusFilter !== 'all') {
-      filtered = filtered.filter(t => t.status === statusFilter);
+  // Calendar: tickets per day (next 14 days + past 3)
+  const calendarDays = useMemo(() => {
+    const days = [];
+    for (let i = -3; i <= 14; i++) {
+      const d = dayjs(selectedDate).add(i, 'day');
+      const dateStr = d.format('YYYY-MM-DD');
+      const count = allTickets.filter(t => {
+        const sched = t.date_scheduled || t.date_created;
+        if (!sched) return false;
+        return sched === dateStr && !['completed', 'closed', 'archived'].includes(t.status || '');
+      }).length;
+      days.push({ date: dateStr, count, isSelected: dateStr === selectedDate, isToday: dateStr === dayjs().format('YYYY-MM-DD') });
     }
-    return filtered.sort((a, b) => {
-      const pOrder = { emergency: 3, critical: 2, normal: 1 };
-      return (pOrder[b.priority] || 0) - (pOrder[a.priority] || 0);
-    });
-  }, [tickets, statusFilter]);
+    return days;
+  }, [selectedDate, allTickets]);
 
-  const filteredShipments = useMemo(() => {
-    let filtered = shipments.filter(s => s.status !== 'archived');
-    if (statusFilter === 'active') {
-      filtered = filtered.filter(s => !['delivered', 'returned'].includes(s.status));
-    } else if (statusFilter !== 'all') {
-      filtered = filtered.filter(s => s.status === statusFilter);
-    }
-    return filtered.sort((a, b) => new Date(b.date_created) - new Date(a.date_created));
-  }, [shipments, statusFilter]);
+  const totalToday = overdue.length + dueToday.length;
+  const activeTasks = tasks.filter(t => ['open', 'in_progress'].includes(t.status)).length;
+  const pendingShipments = shipments.filter(s => s.status === 'pending').length;
+  const needsParts = tickets.filter(t => t.status === 'needs_parts').length;
+  const onsiteCount = tickets.filter(t => t.type === 'onsite' && !['completed', 'closed', 'archived'].includes(t.status || '')).length;
+  const inhouseCount = tickets.filter(t => t.type === 'inhouse' && !['completed', 'closed', 'archived'].includes(t.status || '')).length;
 
-  const handleSelectAll = (e) => {
-    if (activeTab === 0) {
-      setSelectedTickets(e.target.checked ? new Set(filteredTickets.map(t => t.ticket_id)) : new Set());
-    }
+  const goToDate = (delta) => {
+    setSelectedDate(d => dayjs(d).add(delta, 'day').format('YYYY-MM-DD'));
   };
-
-  const handleSelectItem = (id) => {
-    const newSelected = new Set(selectedTickets);
-    if (newSelected.has(id)) {
-      newSelected.delete(id);
-    } else {
-      newSelected.add(id);
-    }
-    setSelectedTickets(newSelected);
-  };
-
-  const quickActions = [
-    {
-      title: 'New Ticket',
-      description: 'Create a new support ticket',
-      icon: <Add />,
-      color: '#1976d2',
-      onClick: () => navigate('/tickets/new'),
-      badge: null
-    },
-    {
-      title: 'New Shipment',
-      description: 'Create a new shipment',
-      icon: <LocalShipping />,
-      color: '#ff9800',
-      onClick: () => navigate('/shipments/new'),
-      badge: null
-    },
-    {
-      title: 'Inventory',
-      description: 'Manage inventory items',
-      icon: <Inventory />,
-      color: '#4caf50',
-      onClick: () => navigate('/inventory'),
-      badge: stats.lowStockItems > 0 ? stats.lowStockItems : null
-    },
-    {
-      title: 'Tasks',
-      description: 'View and manage tasks',
-      icon: <Task />,
-      color: '#9c27b0',
-      onClick: () => navigate('/tasks'),
-      badge: stats.activeTasks > 0 ? stats.activeTasks : null
-    }
-  ];
 
   return (
-    <Box sx={{ 
-      p: { xs: 2, md: 3 }, 
-      minHeight: '100vh',
-      background: isDark 
-        ? 'linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%)'
-        : 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)',
-      position: 'relative'
-    }}>
-      {/* Background Pattern */}
-      <Box
-        sx={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: isDark 
-            ? 'radial-gradient(circle at 20% 50%, rgba(25, 118, 210, 0.1) 0%, transparent 50%), radial-gradient(circle at 80% 20%, rgba(255, 152, 0, 0.1) 0%, transparent 50%)'
-            : 'radial-gradient(circle at 20% 50%, rgba(25, 118, 210, 0.05) 0%, transparent 50%), radial-gradient(circle at 80% 20%, rgba(255, 152, 0, 0.05) 0%, transparent 50%)',
-          pointerEvents: 'none'
-        }}
-      />
-      
+    <Box sx={{ p: 3, minHeight: '100vh', bgcolor: 'background.default' }}>
       {/* Header */}
-      <Box sx={{ position: 'relative', zIndex: 1, mb: 4 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Box>
-            <Typography variant="h3" fontWeight="bold" sx={{ 
-              background: isDark 
-                ? 'linear-gradient(45deg, #ffffff 30%, #1976d2 90%)'
-                : 'linear-gradient(45deg, #1976d2 30%, #42a5f5 90%)',
-              backgroundClip: 'text',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              mb: 1
-            }}>
-              Welcome back, {user?.name}!
-            </Typography>
-            <Typography variant="h6" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Box sx={{ 
-                width: 8, 
-                height: 8, 
-                borderRadius: '50%', 
-                bgcolor: isConnected ? '#4caf50' : '#f44336',
-                animation: isConnected ? 'pulse 2s infinite' : 'none',
-                '@keyframes pulse': { '0%, 100%': { opacity: 1 }, '50%': { opacity: 0.3 } }
-              }} />
-              {isConnected ? 'Live Updates' : 'Offline Mode'} • <Clock />
-            </Typography>
-          </Box>
-          
-          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-            <IconButton onClick={fetchData} sx={{ 
-              bgcolor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',
-              '&:hover': { bgcolor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.1)' }
-            }}>
-              <Refresh />
-            </IconButton>
-            <IconButton onClick={() => setSettingsOpen(true)} sx={{ 
-              bgcolor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',
-              '&:hover': { bgcolor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.1)' }
-            }}>
-              <Settings />
-            </IconButton>
-          </Box>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
+        <Box>
+          <Typography variant="h4" fontWeight="bold" sx={{ mb: 0.5 }}>
+            {dayjs(selectedDate).format('dddd, MMM D')}
+          </Typography>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Chip
+              size="small"
+              icon={isConnected ? <CheckCircle sx={{ fontSize: 14 }} /> : null}
+              label={isConnected ? 'Live' : 'Offline'}
+              color={isConnected ? 'success' : 'default'}
+              sx={{ height: 24 }}
+            />
+            <Typography variant="body2" color="text.secondary">{user?.name}</Typography>
+          </Stack>
         </Box>
-      </Box>
+        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+          <IconButton onClick={fetchAllData} size="small"><Refresh /></IconButton>
+          <Tabs value={viewMode} onChange={(_, v) => setViewMode(v)} sx={{ minHeight: 36, '& .MuiTab-root': { minHeight: 36 } }}>
+            <Tab value="day" label="Day View" icon={<ViewDay sx={{ fontSize: 18 }} />} iconPosition="start" />
+            <Tab value="calendar" label="Calendar" icon={<CalendarMonth sx={{ fontSize: 18 }} />} iconPosition="start" />
+          </Tabs>
+          <TextField
+            size="small"
+            type="date"
+            value={selectedDate}
+            onChange={(e) => setSelectedDate(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <IconButton size="small" onClick={() => goToDate(-1)}><ChevronLeft /></IconButton>
+                </InputAdornment>
+              ),
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton size="small" onClick={() => goToDate(1)}><ChevronRight /></IconButton>
+                </InputAdornment>
+              )
+            }}
+            sx={{ width: 180 }}
+          />
+        </Stack>
+      </Stack>
 
-      {/* Stats Cards */}
-      <Grid container spacing={densitySpacing} sx={{ position: 'relative', zIndex: 1, mb: 3 }}>
-        {widgetSettings.showKpiActiveTickets && (
-          <Grid item xs={12} sm={6} md={kpiMdCols}>
-            <StatCard
-              title="Active Tickets"
-              value={stats.totalTickets}
-              change={kpiTrends.activeTickets.change}
-              trend={kpiTrends.activeTickets.trend}
-              tooltip={kpiTrends.activeTickets.tooltip}
-              icon={<Assignment />}
-              color="#1976d2"
-              loading={loading}
-              compact={widgetSettings.compactCards || density !== 'comfortable'}
-              onClick={() => navigate('/tickets')}
-            />
-          </Grid>
-        )}
-        {widgetSettings.showKpiPendingShipments && (
-          <Grid item xs={12} sm={6} md={kpiMdCols}>
-            <StatCard
-              title="Pending Shipments"
-              value={stats.pendingShipments}
-              change={kpiTrends.pendingShipments.change}
-              trend={kpiTrends.pendingShipments.trend}
-              tooltip={kpiTrends.pendingShipments.tooltip}
-              icon={<LocalShipping />}
-              color="#ff9800"
-              loading={loading}
-              compact={widgetSettings.compactCards || density !== 'comfortable'}
-              onClick={() => navigate('/shipments')}
-            />
-          </Grid>
-        )}
-        {widgetSettings.showKpiActiveTasks && (
-          <Grid item xs={12} sm={6} md={kpiMdCols}>
-            <StatCard
-              title="Active Tasks"
-              value={stats.activeTasks}
-              change={kpiTrends.activeTasks.change}
-              trend={kpiTrends.activeTasks.trend}
-              tooltip={kpiTrends.activeTasks.tooltip}
-              icon={<Task />}
-              color="#9c27b0"
-              loading={loading}
-              compact={widgetSettings.compactCards || density !== 'comfortable'}
-              onClick={() => navigate('/tasks')}
-            />
-          </Grid>
-        )}
-        {widgetSettings.showKpiLowStock && (
-          <Grid item xs={12} sm={6} md={kpiMdCols}>
-            <StatCard
-              title="Low Stock Items"
-              value={stats.lowStockItems}
-              change={kpiTrends.lowStockItems.change}
-              trend={kpiTrends.lowStockItems.trend}
-              tooltip={kpiTrends.lowStockItems.tooltip}
-              icon={<Warning />}
-              color="#f44336"
-              loading={loading}
-              compact={widgetSettings.compactCards || density !== 'comfortable'}
-              onClick={() => navigate('/inventory')}
-            />
-          </Grid>
-        )}
+      {/* Quick stats row */}
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        <Grid item>
+          <Card sx={{ minWidth: 140, cursor: 'pointer', bgcolor: overdue.length > 0 ? 'error.dark' : 'background.paper', color: overdue.length > 0 ? 'white' : 'text.primary' }} onClick={() => navigate('/tickets?status=active')}>
+            <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+              <Typography variant="h4" fontWeight="bold">{overdue.length}</Typography>
+              <Typography variant="body2" sx={{ opacity: 0.9 }}>Overdue</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item>
+          <Card sx={{ minWidth: 140, cursor: 'pointer' }} onClick={() => navigate('/tickets')}>
+            <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+              <Typography variant="h4" fontWeight="bold" color="primary">{totalToday}</Typography>
+              <Typography variant="body2" color="text.secondary">Today</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item>
+          <Card sx={{ minWidth: 140, cursor: 'pointer' }} onClick={() => navigate('/tickets?type=onsite')}>
+            <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+              <Typography variant="h4" fontWeight="bold" sx={{ color: '#1976d2' }}>{onsiteCount}</Typography>
+              <Typography variant="body2" color="text.secondary">Onsite</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item>
+          <Card sx={{ minWidth: 140, cursor: 'pointer' }} onClick={() => navigate('/tickets?type=inhouse')}>
+            <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+              <Typography variant="h4" fontWeight="bold" sx={{ color: '#2e7d32' }}>{inhouseCount}</Typography>
+              <Typography variant="body2" color="text.secondary">Inhouse</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item>
+          <Card sx={{ minWidth: 140, cursor: 'pointer', borderLeft: needsParts > 0 ? '4px solid #e65100' : undefined }} onClick={() => navigate('/tickets?status=needs_parts')}>
+            <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+              <Typography variant="h4" fontWeight="bold" sx={{ color: needsParts > 0 ? '#e65100' : 'text.secondary' }}>{needsParts}</Typography>
+              <Typography variant="body2" color="text.secondary">Needs Parts</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item>
+          <Card sx={{ minWidth: 140, cursor: 'pointer' }} onClick={() => navigate('/tasks')}>
+            <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+              <Typography variant="h4" fontWeight="bold" color="secondary">{activeTasks}</Typography>
+              <Typography variant="body2" color="text.secondary">Tasks</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item>
+          <Card sx={{ minWidth: 140, cursor: 'pointer' }} onClick={() => navigate('/shipments')}>
+            <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+              <Typography variant="h4" fontWeight="bold">{pendingShipments}</Typography>
+              <Typography variant="body2" color="text.secondary">Shipments</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
       </Grid>
 
-      {/* Quick Actions */}
-      <Box sx={{ position: 'relative', zIndex: 1, mb: 4 }}>
-        <Typography variant="h5" fontWeight="bold" sx={{ mb: 3 }}>
-          Quick Actions
-        </Typography>
-        <Grid container spacing={densitySpacing}>
-          {quickActions.map((action, index) => (
-            <Grid item xs={12} sm={6} md={(widgetSettings.compactCards || density !== 'comfortable') ? 2 : 3} key={index}>
-              <QuickActionCard {...action} compact={widgetSettings.compactCards || density !== 'comfortable'} />
-            </Grid>
-          ))}
-        </Grid>
-      </Box>
+      <Grid container spacing={3}>
+        {/* Main: Tickets for the day */}
+        <Grid item lg={8}>
+          <Paper sx={{ p: 2 }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+              <Box>
+                <Typography variant="h6" fontWeight="bold">Tickets for {dayjs(selectedDate).format('MMM D')}</Typography>
+                <Tabs value={typeFilter} onChange={(_, v) => setTypeFilter(v)} sx={{ mt: 1, minHeight: 36, '& .MuiTab-root': { minHeight: 36, py: 0, textTransform: 'none' } }}>
+                  {TICKET_TYPES.map(t => (
+                    <Tab key={t.key} value={t.key} label={t.label} icon={t.icon} iconPosition="start" />
+                  ))}
+                </Tabs>
+              </Box>
+              <Stack direction="row" spacing={1}>
+                <Button size="small" variant="outlined" onClick={() => navigate('/tickets')} endIcon={<OpenInNew sx={{ fontSize: 14 }} />}>
+                  All Tickets
+                </Button>
+                <Button size="small" variant="contained" startIcon={<Add />} onClick={() => navigate('/tickets/new')}>
+                  New Ticket
+                </Button>
+              </Stack>
+            </Stack>
 
-      {/* Main Content Grid */}
-      <Grid container spacing={3} sx={{ position: 'relative', zIndex: 1 }}>
-        {/* Recent Activity */}
-        <Grid item xs={12} md={6}>
-          <RecentActivityCard
-            title="Recent Activity"
-            activities={recentActivities}
-            loading={loading}
-            onViewAll={() => navigate('/tickets')}
-          />
+            {loading ? (
+              <Stack spacing={1}>
+                {[1, 2, 3].map(i => <Skeleton key={i} variant="rectangular" height={56} />)}
+              </Stack>
+            ) : (
+              <Stack spacing={2}>
+                {overdue.length > 0 && (
+                  <Box>
+                    <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                      <EventBusy sx={{ color: 'error.main', fontSize: 20 }} />
+                      <Typography variant="subtitle2" fontWeight="bold" color="error.main">Overdue ({overdue.length})</Typography>
+                    </Stack>
+                    <Stack spacing={1}>
+                      {overdue.map(t => (
+                        <TicketCard key={t.ticket_id} ticket={t} variant="overdue" onClick={(id) => navigate(`/tickets/${id}`)} />
+                      ))}
+                    </Stack>
+                  </Box>
+                )}
+                {dueToday.length > 0 && (
+                  <Box>
+                    <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                      <Schedule sx={{ color: 'primary.main', fontSize: 20 }} />
+                      <Typography variant="subtitle2" fontWeight="bold" color="primary.main">Due Today ({dueToday.length})</Typography>
+                    </Stack>
+                    <Stack spacing={1}>
+                      {dueToday.map(t => (
+                        <TicketCard key={t.ticket_id} ticket={t} variant="due" onClick={(id) => navigate(`/tickets/${id}`)} />
+                      ))}
+                    </Stack>
+                  </Box>
+                )}
+                {upcoming.length > 0 && (
+                  <Box>
+                    <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                      <CalendarMonth sx={{ color: 'success.main', fontSize: 20 }} />
+                      <Typography variant="subtitle2" fontWeight="bold" color="success.main">Upcoming ({upcoming.length})</Typography>
+                    </Stack>
+                    <Stack spacing={1}>
+                      {upcoming.map(t => (
+                        <TicketCard key={t.ticket_id} ticket={t} variant="upcoming" onClick={(id) => navigate(`/tickets/${id}`)} />
+                      ))}
+                    </Stack>
+                  </Box>
+                )}
+                {overdue.length === 0 && dueToday.length === 0 && upcoming.length === 0 && (
+                  <Box sx={{ py: 6, textAlign: 'center' }}>
+                    <Typography color="text.secondary">No tickets for this date</Typography>
+                    <Button size="small" sx={{ mt: 1 }} onClick={() => navigate('/tickets/new')}>Create a ticket</Button>
+                  </Box>
+                )}
+              </Stack>
+            )}
+          </Paper>
         </Grid>
 
-        {/* Performance Chart */}
-        <Grid item xs={12} md={6}>
-          <PerformanceChart
-            title="Ticket Completion Rate"
-            data={performanceData}
-            loading={loading}
-          />
-        </Grid>
+        {/* Sidebar: Charts, links & quick actions */}
+        <Grid item lg={4}>
+          <Stack spacing={3}>
+            {/* Status breakdown */}
+            <Paper sx={{ p: 2 }}>
+              <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 2 }}>By Status</Typography>
+              {loading ? <Skeleton variant="rectangular" height={180} /> : (
+                statusChartData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={180}>
+                    <PieChart>
+                      <Pie data={statusChartData} cx="50%" cy="50%" innerRadius={50} outerRadius={70} paddingAngle={2} dataKey="value">
+                        {statusChartData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+                      </Pie>
+                      <RechartsTooltip formatter={(v, n) => [`${v} tickets`, n]} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <Typography variant="body2" color="text.secondary">No active tickets</Typography>
+                )
+              )}
+            </Paper>
 
-        {/* Calendar (next 14 days) */}
-        {widgetSettings.showCalendar && (
-          <Grid item xs={12}>
-            <Card sx={{
-              background: isDark 
-                ? 'linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%)'
-                : 'linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%)',
-              border: `1px solid ${divider}`,
-            }}>
-              <CardContent sx={{ p: 2 }}>
-                <Typography variant="h6" fontWeight="bold" sx={{ mb: 2 }}>Upcoming (14 days)</Typography>
-                <Grid container spacing={2}>
-                  {Array.from({ length: Number(widgetSettings.calendarDays) || 14 }, (_, i) => {
-                    const date = new Date();
-                    date.setDate(date.getDate() + i);
-                    const dateStr = date.toISOString().split('T')[0];
-                    const dayTickets = tickets.filter((t) => (t.date_scheduled || t.date_created)?.startsWith(dateStr));
-                    const limit = Number(widgetSettings.calendarItemsPerDay) || 5;
-                    const overflow = Math.max(0, dayTickets.length - limit);
+            {/* Completion trend */}
+            <Paper sx={{ p: 2 }}>
+              <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 2 }}>Completed (7 days)</Typography>
+              {loading ? <Skeleton variant="rectangular" height={140} /> : (
+                <ResponsiveContainer width="100%" height={140}>
+                  <BarChart data={completionChartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#444' : '#eee'} />
+                    <XAxis dataKey="day" tick={{ fontSize: 11 }} />
+                    <YAxis tick={{ fontSize: 11 }} />
+                    <RechartsTooltip />
+                    <Bar dataKey="completed" fill="#2e7d32" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </Paper>
+
+            {/* Calendar / Week strip */}
+            <Paper sx={{ p: 2 }}>
+              <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
+                <Typography variant="subtitle1" fontWeight="bold">
+                  {viewMode === 'calendar' ? dayjs(selectedDate).format('MMMM YYYY') : 'Week'}
+                </Typography>
+                {viewMode === 'calendar' && (
+                  <Stack direction="row" spacing={0.5}>
+                    <IconButton size="small" onClick={() => setSelectedDate(dayjs(selectedDate).subtract(1, 'month').format('YYYY-MM-DD'))}>
+                      <ChevronLeft fontSize="small" />
+                    </IconButton>
+                    <Button size="small" sx={{ minWidth: 'auto', px: 1 }} onClick={() => setSelectedDate(dayjs().format('YYYY-MM-DD'))}>Today</Button>
+                    <IconButton size="small" onClick={() => setSelectedDate(dayjs(selectedDate).add(1, 'month').format('YYYY-MM-DD'))}>
+                      <ChevronRight fontSize="small" />
+                    </IconButton>
+                  </Stack>
+                )}
+              </Stack>
+              {viewMode === 'calendar' ? (
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 0.5 }}>
+                  {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+                    <Typography key={i} variant="caption" color="text.secondary" sx={{ textAlign: 'center', fontWeight: 600 }}>{d}</Typography>
+                  ))}
+                  {Array.from({ length: dayjs(selectedDate).startOf('month').day() }, (_, i) => (
+                    <Box key={`empty-${i}`} />
+                  ))}
+                  {Array.from({ length: dayjs(selectedDate).daysInMonth() }, (_, i) => {
+                    const d = dayjs(selectedDate).date(i + 1);
+                    const dateStr = d.format('YYYY-MM-DD');
+                    const count = allTickets.filter(t => {
+                      const sched = t.date_scheduled || t.date_created;
+                      return sched === dateStr && !['completed', 'closed', 'archived'].includes(t.status || '');
+                    }).length;
+                    const isSelected = dateStr === selectedDate;
+                    const isToday = dateStr === dayjs().format('YYYY-MM-DD');
                     return (
-                      <Grid item xs={12} sm={6} md={3} lg={2} key={dateStr}>
-                        <Box sx={{ border: `1px dashed ${isDark ? '#444' : '#ddd'}`, borderRadius: 1, p: 1 }}>
-                          <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                            {date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                          </Typography>
-                          {dayTickets.length === 0 ? (
-                            <Typography variant="caption" color="text.secondary">No tickets</Typography>
-                          ) : (
-                            <>
-                            {dayTickets.slice(0, limit).map((t) => (
-                              <Box key={t.ticket_id} sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                                <PriorityChip priority={t.priority} size="small" sx={{ height: 18, fontSize: '0.6rem' }} />
-                                <Typography variant="caption" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                  {t.ticket_id} • {t.site_id}
-                                </Typography>
-                              </Box>
-                            ))}
-                            {overflow > 0 && (
-                              <Typography
-                                variant="caption"
-                                sx={{ cursor: 'pointer', color: 'primary.main', fontWeight: 600 }}
-                                onClick={() => setCalendarDialog({ open: true, date: dateStr, tickets: dayTickets })}
-                              >
-                                +{overflow} more
-                              </Typography>
-                            )}
-                            </>
+                      <Tooltip key={dateStr} title={count > 0 ? `${count} tickets` : 'No tickets'}>
+                        <Box
+                          onClick={() => setSelectedDate(dateStr)}
+                          sx={{
+                            aspectRatio: 1,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            borderRadius: 1,
+                            cursor: 'pointer',
+                            bgcolor: isSelected ? 'primary.main' : isToday ? 'action.selected' : 'transparent',
+                            color: isSelected ? 'primary.contrastText' : 'text.primary',
+                            '&:hover': { bgcolor: isSelected ? 'primary.dark' : 'action.hover' }
+                          }}
+                        >
+                          <Typography variant="body2" fontWeight={isSelected ? 'bold' : 'normal'}>{i + 1}</Typography>
+                          {count > 0 && (
+                            <Box sx={{ width: 4, height: 4, borderRadius: '50%', bgcolor: isSelected ? 'primary.contrastText' : 'primary.main', mt: 0.25 }} />
                           )}
                         </Box>
-                      </Grid>
-                    );
-                  })}
-                </Grid>
-              </CardContent>
-            </Card>
-          </Grid>
-        )}
-
-        {/* Timeline (Gantt-like) for next 14 days */}
-        {widgetSettings.showTimeline && (
-          <Grid item xs={12}>
-            <Card sx={{
-              background: isDark 
-                ? 'linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%)'
-                : 'linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%)',
-              border: `1px solid ${divider}`,
-            }}>
-              <CardContent sx={{ p: 2 }}>
-                <Typography variant="h6" fontWeight="bold" sx={{ mb: 2 }}>Timeline (next 14 days)</Typography>
-                <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
-                  {Array.from({ length: Number(widgetSettings.timelineDays) || 14 }, (_, i) => {
-                    const d = new Date();
-                    d.setDate(d.getDate() + i);
-                    return (
-                      <Typography key={i} variant="caption" sx={{ flex: 1, textAlign: 'center' }}>
-                        {d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' })}
-                      </Typography>
+                      </Tooltip>
                     );
                   })}
                 </Box>
-                <Divider sx={{ mb: 1 }} />
-                <Box sx={{ maxHeight: 320, overflowY: 'auto' }}>
-                  <Stack spacing={1}>
-                    {tickets.slice(0, Number(widgetSettings.timelineLimit) || 50).map((t) => {
-                    const start = new Date(t.date_created || new Date());
-                    const end = new Date(t.date_scheduled || t.date_created || new Date());
-                    // Ensure at least 1 day bar
-                    if (end <= start) end.setDate(start.getDate() + 1);
-                    const today = new Date();
-                    const rangeStart = new Date();
-                    rangeStart.setDate(today.getDate());
-                    const rangeEnd = new Date();
-                      rangeEnd.setDate(today.getDate() + (Number(widgetSettings.timelineDays) || 14));
-                    const totalMs = rangeEnd - rangeStart;
-                    const barStart = Math.max(0, start - rangeStart);
-                    const barEnd = Math.min(totalMs, end - rangeStart);
-                    const leftPct = (barStart / totalMs) * 100;
-                    const widthPct = Math.max(2, ((barEnd - barStart) / totalMs) * 100);
-                    return (
-                      <Box key={t.ticket_id}>
-                        <Typography variant="caption" sx={{ mb: 0.5, display: 'block' }}>
-                          {t.ticket_id} • {t.site_id} • {t.priority}
-                        </Typography>
-                        <Box sx={{ position: 'relative', height: 10, bgcolor: isDark ? '#222' : '#eee', borderRadius: 1 }}>
-                          <Box sx={{
-                            position: 'absolute',
-                            left: `${leftPct}%`,
-                            width: `${widthPct}%`,
-                            height: '100%',
-                            bgcolor: t.priority === 'emergency' ? '#f44336' : t.priority === 'critical' ? '#ff9800' : '#4caf50',
-                            borderRadius: 1
-                          }} />
-                        </Box>
-                      </Box>
-                    );
-                    })}
-                  </Stack>
-                </Box>
-                {tickets.length > Number(widgetSettings.timelineLimit) && (
-                  <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                    Showing {Math.min(tickets.length, Number(widgetSettings.timelineLimit))} of {tickets.length}
-                  </Typography>
-                )}
-              </CardContent>
-            </Card>
-          </Grid>
-        )}
-      </Grid>
-
-      {/* List View with Tabs */}
-      <Box sx={{ position: 'relative', zIndex: 1, mt: 4 }}>
-        <Card
-          sx={{
-            background: isDark 
-              ? 'linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%)'
-              : 'linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%)',
-            border: `1px solid ${divider}`,
-          }}
-        >
-          {/* Tabs Header */}
-          <Box sx={{ borderBottom: `1px solid ${divider}` }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2 }}>
-              <Tabs 
-                value={activeTab} 
-                onChange={(e, v) => setActiveTab(v)}
-                sx={{ minHeight: 40 }}
-              >
-                <Tab 
-                  label={
-                    <Badge badgeContent={filteredTickets.length} color="primary" max={999}>
-                      <Typography variant="body2" fontWeight="bold">Active Tickets</Typography>
-                    </Badge>
-                  } 
-                />
-                <Tab 
-                  label={
-                    <Badge badgeContent={filteredShipments.length} color="secondary" max={999}>
-                      <Typography variant="body2" fontWeight="bold">Shipments</Typography>
-                    </Badge>
-                  } 
-                />
-              </Tabs>
-              
-              <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                <FormControl size="small" sx={{ minWidth: 120 }}>
-                  <Select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    displayEmpty
-                    sx={{ height: 32, fontSize: '0.875rem' }}
-                  >
-                    <MenuItem value="all">All Status</MenuItem>
-                    <MenuItem value="active">Active Only</MenuItem>
-                    {activeTab === 0 ? (
-                      <>
-                        <MenuItem value="open">Open</MenuItem>
-                        <MenuItem value="in_progress">In Progress</MenuItem>
-                        <MenuItem value="needs_parts">Needs Parts</MenuItem>
-                        <MenuItem value="completed">Completed</MenuItem>
-                      </>
-                    ) : (
-                      <>
-                        <MenuItem value="pending">Pending</MenuItem>
-                        <MenuItem value="shipped">Shipped</MenuItem>
-                        <MenuItem value="delivered">Delivered</MenuItem>
-                      </>
-                    )}
-                  </Select>
-                </FormControl>
-                
-                {selectedTickets.size > 0 && activeTab === 0 && (
-                  <Chip 
-                    label={`${selectedTickets.size} selected`} 
-                    size="small" 
-                    onDelete={() => setSelectedTickets(new Set())} 
-                  />
-                )}
-              </Box>
-            </Box>
-          </Box>
-
-          {/* Table Content */}
-          <TableContainer sx={{ maxHeight: 400 }}>
-            <Table size="small" stickyHeader sx={{ '& td, & th': { py: 0.5, px: 1, fontSize: '0.75rem' } }}>
-              <TableHead>
-                <TableRow sx={{ '& th': { bgcolor: tableHeaderBg, fontWeight: 'bold' } }}>
-                  {activeTab === 0 && (
-                    <TableCell padding="checkbox" sx={{ width: 40 }}>
-                      <Checkbox 
-                        size="small" 
-                        onChange={handleSelectAll}
-                        checked={filteredTickets.length > 0 && selectedTickets.size === filteredTickets.length}
+              ) : (
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                  {calendarDays.map(({ date, count, isSelected, isToday }) => (
+                    <Tooltip key={date} title={`${count} tickets • ${dayjs(date).format('ddd, MMM D')}`}>
+                      <Chip
+                        size="small"
+                        label={dayjs(date).format('D')}
+                        onClick={() => setSelectedDate(date)}
+                        sx={{
+                          minWidth: 36,
+                          fontWeight: isSelected ? 'bold' : 'normal',
+                          border: isToday ? 2 : 0,
+                          borderColor: 'primary.main',
+                          bgcolor: isSelected ? 'primary.main' : count > 0 ? 'action.selected' : 'transparent',
+                          color: isSelected ? 'primary.contrastText' : 'text.primary'
+                        }}
                       />
-                    </TableCell>
-                  )}
-                  <TableCell sx={{ width: 100 }}>
-                    {activeTab === 0 ? 'Ticket ID' : 'Shipment ID'}
-                  </TableCell>
-                  <TableCell sx={{ width: 80 }}>Site</TableCell>
-                  <TableCell>
-                    {activeTab === 0 ? 'Description' : 'Items'}
-                  </TableCell>
-                  <TableCell sx={{ width: 80 }}>Status</TableCell>
-                  <TableCell sx={{ width: 70 }}>Priority</TableCell>
-                  <TableCell sx={{ width: 80 }}>Date</TableCell>
-                  <TableCell sx={{ width: 100 }}>Assigned</TableCell>
-                  <TableCell sx={{ width: 80 }}>Actions</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {activeTab === 0 ? (
-                  // Tickets Tab
-                  filteredTickets.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          No tickets found
-                        </Typography>
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredTickets.map((ticket) => (
-                      <TableRow
-                        key={ticket.ticket_id}
-                        hover
-                        sx={{ cursor: 'pointer', '&:hover': { bgcolor: rowHoverBg } }}
-                        onClick={() => navigate(`/tickets/${ticket.ticket_id}`)}
-                      >
-                        <TableCell padding="checkbox" onClick={(e) => e.stopPropagation()}>
-                          <Checkbox
-                            size="small"
-                            checked={selectedTickets.has(ticket.ticket_id)}
-                            onChange={() => handleSelectItem(ticket.ticket_id)}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2" fontWeight="bold" sx={{ fontSize: '0.75rem' }}>
-                            {ticket.ticket_id}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2" sx={{ fontSize: '0.75rem' }}>
-                            {ticket.site_id}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Typography 
-                            variant="body2" 
-                            sx={{ 
-                              fontSize: '0.75rem',
-                              maxWidth: 200,
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap'
-                            }}
-                          >
-                            {ticket.description || 'No description'}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <StatusChip status={ticket.status} entityType="ticket" size="small" sx={{ height: 20, fontSize: '0.65rem' }} />
-                        </TableCell>
-                        <TableCell>
-                          <PriorityChip priority={ticket.priority} size="small" sx={{ height: 20, fontSize: '0.65rem' }} />
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>
-                            {ticket.date_created ? 
-                              new Date(ticket.date_created).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) 
-                              : '-'
-                            }
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>
-                            {ticket.assigned_user?.name || '-'}
-                          </Typography>
-                        </TableCell>
-                        <TableCell onClick={(e) => e.stopPropagation()}>
-                          <IconButton size="small" sx={{ p: 0.5 }}>
-                            <Visibility fontSize="small" />
-                          </IconButton>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )
-                ) : (
-                  // Shipments Tab
-                  filteredShipments.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          No shipments found
-                        </Typography>
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredShipments.map((shipment) => (
-                      <TableRow
-                        key={shipment.shipment_id}
-                        hover
-                        sx={{ cursor: 'pointer', '&:hover': { bgcolor: rowHoverBg } }}
-                        onClick={() => navigate(`/shipments/${shipment.shipment_id}/edit`)}
-                      >
-                        <TableCell>
-                          <Typography variant="body2" fontWeight="bold" sx={{ fontSize: '0.75rem' }}>
-                            {shipment.shipment_id}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2" sx={{ fontSize: '0.75rem' }}>
-                            {shipment.site_id}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Box sx={{ maxWidth: 200 }}>
-                            {shipment.shipment_items && shipment.shipment_items.length > 0 ? (
-                              shipment.shipment_items.map((item, index) => (
-                                <Typography 
-                                  key={index} 
-                                  variant="body2" 
-                                  sx={{ 
-                                    fontSize: '0.75rem',
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                    mb: index < shipment.shipment_items.length - 1 ? 0.5 : 0
-                                  }}
-                                >
-                                  {item.quantity}x {item.what_is_being_shipped}
-                                </Typography>
-                              ))
-                            ) : (
-                              <Typography variant="body2" sx={{ fontSize: '0.75rem' }}>
-                                {shipment.what_is_being_shipped || 'No items'}
-                              </Typography>
-                            )}
-                          </Box>
-                        </TableCell>
-                        <TableCell>
-                          <StatusChip status={shipment.status} entityType="shipment" size="small" sx={{ height: 20, fontSize: '0.65rem' }} />
-                        </TableCell>
-                        <TableCell>
-                          <PriorityChip priority={shipment.shipping_priority || 'normal'} type="shipment" size="small" sx={{ height: 20, fontSize: '0.65rem' }} />
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>
-                            {shipment.date_created ? 
-                              new Date(shipment.date_created).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) 
-                              : '-'
-                            }
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>
-                            {shipment.assigned_user?.name || '-'}
-                          </Typography>
-                        </TableCell>
-                        <TableCell onClick={(e) => e.stopPropagation()}>
-                          <IconButton size="small" sx={{ p: 0.5 }}>
-                            <Visibility fontSize="small" />
-                          </IconButton>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )
-                )}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Card>
-      </Box>
+                    </Tooltip>
+                  ))}
+                </Box>
+              )}
+            </Paper>
 
-      {/* Widget Settings Dialog */}
-      <Dialog open={settingsOpen} onClose={() => setSettingsOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Dashboard Settings</DialogTitle>
-        <DialogContent>
-          <Typography variant="h6" sx={{ mb: 2 }}>Widget Visibility</Typography>
-          <Stack spacing={2}>
-            {Object.entries(widgetSettings).filter(([_, value]) => typeof value === 'boolean').map(([key, value]) => (
-              <FormControlLabel
-                key={key}
-                control={
-                  <Switch
-                    checked={value}
-                    onChange={(e) => setWidgetSettings(prev => ({ ...prev, [key]: typeof value === 'boolean' ? e.target.checked : value }))}
-                  />
-                }
-                label={key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
-              />
-            ))}
-            <Divider />
-            <Typography variant="body1">Advanced</Typography>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <Typography variant="body2">Trend Window (days)</Typography>
-              <Select
-                size="small"
-                value={widgetSettings.kpiTrendWindowDays}
-                onChange={(e) => setWidgetSettings(prev => ({ ...prev, kpiTrendWindowDays: Number(e.target.value) }))}
-                sx={{ width: 100 }}
-              >
-                <MenuItem value={7}>7</MenuItem>
-                <MenuItem value={14}>14</MenuItem>
-                <MenuItem value={30}>30</MenuItem>
-              </Select>
-            </Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <Typography variant="body2">Density</Typography>
-              <Select
-                size="small"
-                value={widgetSettings.densityPreset}
-                onChange={(e) => setWidgetSettings(prev => ({ ...prev, densityPreset: e.target.value }))}
-                sx={{ width: 160 }}
-              >
-                <MenuItem value={'comfortable'}>Comfortable</MenuItem>
-                <MenuItem value={'compact'}>Compact</MenuItem>
-                <MenuItem value={'ultra'}>Ultra-compact</MenuItem>
-              </Select>
-            </Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <Typography variant="body2">Calendar items per day</Typography>
-              <Select
-                size="small"
-                value={widgetSettings.calendarItemsPerDay}
-                onChange={(e) => setWidgetSettings(prev => ({ ...prev, calendarItemsPerDay: Number(e.target.value) }))}
-                sx={{ width: 100 }}
-              >
-                <MenuItem value={5}>5</MenuItem>
-                <MenuItem value={10}>10</MenuItem>
-                <MenuItem value={25}>25</MenuItem>
-              </Select>
-            </Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <Typography variant="body2">Calendar range (days)</Typography>
-              <Select
-                size="small"
-                value={widgetSettings.calendarDays}
-                onChange={(e) => setWidgetSettings(prev => ({ ...prev, calendarDays: Number(e.target.value) }))}
-                sx={{ width: 120 }}
-              >
-                <MenuItem value={7}>7</MenuItem>
-                <MenuItem value={14}>14</MenuItem>
-                <MenuItem value={30}>30</MenuItem>
-              </Select>
-            </Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <Typography variant="body2">Timeline row limit</Typography>
-              <Select
-                size="small"
-                value={widgetSettings.timelineLimit}
-                onChange={(e) => setWidgetSettings(prev => ({ ...prev, timelineLimit: Number(e.target.value) }))}
-                sx={{ width: 100 }}
-              >
-                <MenuItem value={20}>20</MenuItem>
-                <MenuItem value={50}>50</MenuItem>
-                <MenuItem value={100}>100</MenuItem>
-              </Select>
-            </Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <Typography variant="body2">Timeline range (days)</Typography>
-              <Select
-                size="small"
-                value={widgetSettings.timelineDays}
-                onChange={(e) => setWidgetSettings(prev => ({ ...prev, timelineDays: Number(e.target.value) }))}
-                sx={{ width: 120 }}
-              >
-                <MenuItem value={7}>7</MenuItem>
-                <MenuItem value={14}>14</MenuItem>
-                <MenuItem value={30}>30</MenuItem>
-              </Select>
-            </Box>
+            {/* Quick actions */}
+            <Paper sx={{ p: 2 }}>
+              <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 2 }}>Quick Actions</Typography>
+              <Stack spacing={1}>
+                <Button fullWidth variant="outlined" startIcon={<Add />} onClick={() => navigate('/tickets/new')}>New Ticket</Button>
+                <Button fullWidth variant="outlined" startIcon={<LocalShipping />} onClick={() => navigate('/shipments/new')}>New Shipment</Button>
+                <Button fullWidth variant="outlined" startIcon={<Task />} onClick={() => navigate('/tasks/new')}>New Task</Button>
+                <Button fullWidth variant="outlined" startIcon={<Inventory />} onClick={() => navigate('/inventory')}>Inventory</Button>
+              </Stack>
+            </Paper>
+
+            {/* Quick links */}
+            <Paper sx={{ p: 2 }}>
+              <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 2 }}>Quick Links</Typography>
+              <Stack spacing={1}>
+                <Link component="button" variant="body2" onClick={() => navigate('/tickets')} sx={{ textAlign: 'left', justifyContent: 'flex-start' }}>
+                  <Stack direction="row" spacing={1} alignItems="center"><Assignment fontSize="small" /> All Tickets</Stack>
+                </Link>
+                <Link component="button" variant="body2" onClick={() => navigate('/tickets?type=onsite')} sx={{ textAlign: 'left' }}>
+                  <Stack direction="row" spacing={1} alignItems="center"><LocationOn fontSize="small" /> Onsite Tickets</Stack>
+                </Link>
+                <Link component="button" variant="body2" onClick={() => navigate('/tickets?type=inhouse')} sx={{ textAlign: 'left' }}>
+                  <Stack direction="row" spacing={1} alignItems="center"><HomeIcon fontSize="small" /> Inhouse Tickets</Stack>
+                </Link>
+                <Link component="button" variant="body2" onClick={() => navigate('/sites')} sx={{ textAlign: 'left' }}>
+                  <Stack direction="row" spacing={1} alignItems="center"><Business fontSize="small" /> Sites</Stack>
+                </Link>
+                <Link component="button" variant="body2" onClick={() => navigate('/companies')} sx={{ textAlign: 'left' }}>
+                  <Stack direction="row" spacing={1} alignItems="center"><Business fontSize="small" /> Field Tech Companies</Stack>
+                </Link>
+                <Link component="button" variant="body2" onClick={() => navigate('/map')} sx={{ textAlign: 'left' }}>
+                  <Stack direction="row" spacing={1} alignItems="center"><MapIcon fontSize="small" /> Field Tech Map</Stack>
+                </Link>
+                <Link component="button" variant="body2" onClick={() => navigate('/reports')} sx={{ textAlign: 'left' }}>
+                  <Stack direction="row" spacing={1} alignItems="center"><Assessment fontSize="small" /> Reports</Stack>
+                </Link>
+              </Stack>
+            </Paper>
           </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setSettingsOpen(false)}>Close</Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Calendar overflow modal */}
-      <Dialog open={Boolean(calendarDialog?.open)} onClose={() => setCalendarDialog({ open: false, date: null, tickets: [] })} maxWidth="sm" fullWidth>
-        <DialogTitle>Tickets on {calendarDialog?.date}</DialogTitle>
-        <DialogContent>
-          <List dense>
-            {(calendarDialog?.tickets || []).map((t) => (
-              <ListItem key={t.ticket_id} sx={{ px: 0 }}>
-                <ListItemIcon>
-                  <PriorityChip priority={t.priority} size="small" sx={{ height: 18, fontSize: '0.6rem' }} />
-                </ListItemIcon>
-                <ListItemText
-                  primary={<Typography variant="body2">{t.ticket_id} • {t.site_id}</Typography>}
-                  secondary={<Typography variant="caption" color="text.secondary">{t.description || 'No description'}</Typography>}
-                />
-                <ListItemSecondaryAction>
-                  <IconButton size="small" edge="end" onClick={() => { setCalendarDialog({ open: false, date: null, tickets: [] }); navigate(`/tickets/${t.ticket_id}`); }}>
-                    <Visibility fontSize="small" />
-                  </IconButton>
-                </ListItemSecondaryAction>
-              </ListItem>
-            ))}
-          </List>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCalendarDialog({ open: false, date: null, tickets: [] })}>Close</Button>
-        </DialogActions>
-      </Dialog>
+        </Grid>
+      </Grid>
     </Box>
   );
 }

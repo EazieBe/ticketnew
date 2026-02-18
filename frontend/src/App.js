@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import {
   Box,
   CssBaseline,
@@ -62,7 +62,7 @@ import {
   Error,
   Info
 } from '@mui/icons-material';
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './AuthContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { NotificationProvider, useNotifications } from './contexts/NotificationProvider';
@@ -72,7 +72,6 @@ import Logo from './components/Logo';
 import Login from './Login';
 // COMPACT COMPONENTS - New high-density UI
 import CompactOperationsDashboard from './components/CompactOperationsDashboard';
-import ModernDashboard from './components/ModernDashboard';
 import CompactTickets from './CompactTickets';
 import CompactTicketDetail from './CompactTicketDetail';
 import CompactTicketFormComplete from './CompactTicketFormComplete';
@@ -94,19 +93,24 @@ import CompactUserForm from './CompactUserForm';
 // OLD COMPONENTS (still used for Equipment only)
 import EquipmentForm from './EquipmentForm';
 // OTHER COMPONENTS
-import FieldTechMap from './FieldTechMap';
 import { getApiPath } from './apiPaths';
 import SLAManagement from './SLAManagement';
+import ErrorBoundary from './components/ErrorBoundary';
 import Equipment from './Equipment';
 import Audit from './Audit';
-import Reports from './Reports';
+import FieldTechMap from './FieldTechMap';
 import TicketClaim from './TicketClaim';
+import DispatchQueue from './DispatchQueue';
 import SettingsPage from './Settings';
 import Profile from './Profile';
 
 import ChangePassword from './ChangePassword';
 import useApi from './hooks/useApi';
 import { useToast } from './contexts/ToastContext';
+
+// Lazy-loaded routes (code splitting) - FieldTechMap eager: Leaflet needs sync load
+const ModernDashboard = lazy(() => import('./components/ModernDashboard'));
+const Reports = lazy(() => import('./Reports'));
 
 const drawerWidth = 248;
 
@@ -550,7 +554,7 @@ const cleanFormData = (data) => {
   const cleaned = {};
   // Ticket date/numeric fields: send null when empty so backend validation is consistent
   const ticketNullIfEmpty = [
-    'item_id', 'ticket_id', 'charges_out', 'charges_in', 'parts_cost', 'total_cost',
+    'item_id', 'ticket_id', 'assigned_user_id', 'charges_out', 'charges_in', 'parts_cost', 'total_cost',
     'date_shipped', 'date_returned', 'date_created', 'date_scheduled', 'date_closed', 'due_date',
     'time_spent', 'sla_target_hours', 'sla_breach_hours', 'escalation_level',
     'estimated_hours', 'actual_hours', 'billing_rate', 'quality_score'
@@ -610,11 +614,16 @@ function CompactTicketEditWrapper() {
   const handleSubmit = async (values) => {
     try {
       const cleanedData = cleanFormData(values);
+      // Optimistic concurrency: prevent silent overwrites from stale edit forms.
+      cleanedData.expected_ticket_version = ticket?.ticket_version ?? values?.ticket_version ?? 1;
       await api.put(`/tickets/${ticket_id}`, cleanedData);
       success('Ticket updated');
       navigate(`/tickets/${ticket_id}`);
     } catch (err) {
-      const msg = err?.response?.data?.detail || err?.message || 'Failed to update ticket';
+      const isConflict = err?.response?.status === 409;
+      const msg = isConflict
+        ? 'This ticket was updated by another user. Refresh and retry your changes.'
+        : (err?.response?.data?.detail || err?.message || 'Failed to update ticket');
       error(typeof msg === 'string' ? msg : JSON.stringify(msg));
     }
   };
@@ -799,18 +808,21 @@ function CompactInventoryEditWrapper() {
 
 function CompactTaskFormWrapper() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const api = useApi();
   const { success, error } = useToast();
+  const ticketId = searchParams.get('ticket_id') || '';
   const handleSubmit = async (values) => {
     try {
       await api.post('/tasks/', cleanFormData(values));
       success('Task created');
       navigate('/tasks');
-    } catch {
-      error('Failed');
+    } catch (err) {
+      const msg = err?.response?.data?.detail || err?.message || 'Failed to create task';
+      error(typeof msg === 'string' ? msg : JSON.stringify(msg));
     }
   };
-  return <CompactTaskForm onSubmit={handleSubmit} initialValues={{}} isEdit={false} />;
+  return <CompactTaskForm onSubmit={handleSubmit} initialValues={{ ticket_id: ticketId }} isEdit={false} />;
 }
 
 function CompactTaskEditWrapper() {
@@ -838,13 +850,64 @@ function CompactTaskEditWrapper() {
       await api.put(`/tasks/${task_id}`, cleanFormData(values));
       success('Task updated');
       navigate('/tasks');
+    } catch (err) {
+      const msg = err?.response?.data?.detail || err?.message || 'Failed to update task';
+      error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    }
+  };
+  if (loading) return <div>Loading...</div>;
+  if (!task) return <div>Not found</div>;
+  return <CompactTaskForm onSubmit={handleSubmit} initialValues={task} isEdit={true} taskId={task_id} onDeleted={() => navigate('/tasks')} />;
+}
+
+function CompactFieldTechFormWrapper() {
+  const navigate = useNavigate();
+  const api = useApi();
+  const { success, error } = useToast();
+  const handleSubmit = async (values) => {
+    try {
+      await api.post('/fieldtechs/', cleanFormData(values));
+      success('Field tech created');
+      navigate('/fieldtechs');
+    } catch {
+      error('Failed');
+    }
+  };
+  return <CompactFieldTechForm onSubmit={handleSubmit} initialValues={{}} isEdit={false} />;
+}
+
+function CompactFieldTechEditWrapper() {
+  const navigate = useNavigate();
+  const { field_tech_id } = useParams();
+  const api = useApi();
+  const { error, success } = useToast();
+  const [fieldTech, setFieldTech] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    const fetchTech = async () => {
+      try {
+        const response = await api.get(`/fieldtechs/${field_tech_id}`);
+        setFieldTech(response);
+      } catch {
+        error('Error loading');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchTech();
+  }, [field_tech_id, api, error]);
+  const handleSubmit = async (values) => {
+    try {
+      await api.put(`/fieldtechs/${field_tech_id}`, cleanFormData(values));
+      success('Field tech updated');
+      navigate('/fieldtechs');
     } catch {
       error('Failed');
     }
   };
   if (loading) return <div>Loading...</div>;
-  if (!task) return <div>Not found</div>;
-  return <CompactTaskForm onSubmit={handleSubmit} initialValues={task} isEdit={true} />;
+  if (!fieldTech) return <div>Not found</div>;
+  return <CompactFieldTechForm onSubmit={handleSubmit} initialValues={fieldTech} isEdit={true} />;
 }
 
 function CompactShipmentFormWrapper() {
@@ -931,12 +994,23 @@ function CompactShipmentEditWrapper() {
   return <CompactShipmentForm onSubmit={handleSubmit} initialValues={shipment} isEdit={true} />;
 }
 
+const COMPANY_SCHEMA_FIELDS = [
+  'company_name', 'company_number', 'business_phone', 'other_phones',
+  'address', 'city', 'state', 'zip', 'region', 'notes', 'service_radius_miles'
+];
 function cleanCompanyPayload(data) {
-  const { techs, ...rest } = data;
+  const { techs, lat, lng, company_id, created_at, ...rest } = data;
   const cleaned = {};
-  for (const [key, value] of Object.entries(rest)) {
-    if (value === '' || value === null || value === undefined) continue;
-    cleaned[key] = value;
+  for (const key of COMPANY_SCHEMA_FIELDS) {
+    const value = rest[key];
+    if (value === undefined) continue;
+    if (key === 'service_radius_miles') {
+      cleaned[key] = (value === '' || value === null || value === undefined) ? null : Number(value);
+    } else if (value === '' || value === null || value === undefined) {
+      cleaned[key] = null;
+    } else {
+      cleaned[key] = value;
+    }
   }
   return cleaned;
 }
@@ -1048,56 +1122,6 @@ function CompactFieldTechCompanyEditWrapper() {
   if (loading) return <div>Loading...</div>;
   if (!company) return <div>Not found</div>;
   return <CompactFieldTechCompanyForm onSubmit={handleSubmit} initialValues={company} isEdit={true} isSaving={isSaving} />;
-}
-
-function CompactFieldTechCompanyFormWrapper() {
-  const navigate = useNavigate();
-  const api = useApi();
-  const { success, error } = useToast();
-  const handleSubmit = async (values) => {
-    try {
-      await api.post('/fieldtech-companies/', cleanFormData(values));
-      success('Company created');
-      navigate('/companies');
-    } catch {
-      error('Failed');
-    }
-  };
-  return <CompactFieldTechCompanyForm onSubmit={handleSubmit} initialValues={{}} isEdit={false} />;
-}
-
-function CompactFieldTechCompanyEditWrapper() {
-  const navigate = useNavigate();
-  const { company_id } = useParams();
-  const api = useApi();
-  const { error, success } = useToast();
-  const [company, setCompany] = useState(null);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    const fetchCompany = async () => {
-      try {
-        const response = await api.get(`/fieldtech-companies/${company_id}`);
-        setCompany(response);
-      } catch {
-        error('Error loading');
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchCompany();
-  }, [company_id, api, error]);
-  const handleSubmit = async (values) => {
-    try {
-      await api.put(`/fieldtech-companies/${company_id}`, cleanFormData(values));
-      success('Company updated');
-      navigate('/companies');
-    } catch {
-      error('Failed');
-    }
-  };
-  if (loading) return <div>Loading...</div>;
-  if (!company) return <div>Not found</div>;
-  return <CompactFieldTechCompanyForm onSubmit={handleSubmit} initialValues={company} isEdit={true} />;
 }
 
 // ========================================
@@ -1306,12 +1330,6 @@ const navigationItems = [
     badge: null
   },
   {
-    title: 'Companies',
-    path: '/companies',
-    icon: <Business sx={{ color: '#5d4037' }} />,
-    badge: null
-  },
-  {
     title: 'Tasks',
     path: '/tasks',
     icon: <Assessment sx={{ color: '#3f51b5' }} />,
@@ -1345,6 +1363,12 @@ const navigationItems = [
 ];
 
 const adminItems = [
+  {
+    title: 'Dispatcher Queue',
+    path: '/dispatch-queue',
+    icon: <Assignment sx={{ color: '#1565c0' }} />,
+    badge: null
+  },
   {
     title: 'Reports',
     path: '/reports',
@@ -1807,6 +1831,7 @@ function AppLayout() {
             minHeight: 'calc(100vh - 48px)'
           }}
         >
+          <Suspense fallback={<Box display="flex" justifyContent="center" alignItems="center" minHeight={300}><CircularProgress /></Box>}>
           <Routes>
             <Route path="/" element={<ModernDashboard />} />
             
@@ -1863,11 +1888,13 @@ function AppLayout() {
             <Route path="/map" element={<FieldTechMap />} />
             <Route path="/sla" element={<SLAManagement />} />
             <Route path="/reports" element={<Reports />} />
+            <Route path="/dispatch-queue" element={<DispatchQueue />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/change-password" element={<ChangePassword userId={location.state?.userId || (user && user.user_id)} />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          </Suspense>
         </Box>
 
         {/* User Menu */}
@@ -2051,7 +2078,9 @@ function App() {
                 <Route path="/login" element={<Login />} />
                 <Route path="/*" element={
                   <RequireAuth>
-                    <AppLayout />
+                    <ErrorBoundary>
+                      <AppLayout />
+                    </ErrorBoundary>
                   </RequireAuth>
                 } />
               </Routes>

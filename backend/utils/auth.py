@@ -16,14 +16,12 @@ import models
 import crud
 from database import get_db
 
-# Security configuration
-SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-here")
-
-# Validate SECRET_KEY length for security
-if len(SECRET_KEY) < 32:
+# Security configuration - must come from .env; no default
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY or len(SECRET_KEY) < 32:
     raise ValueError(
-        "SECRET_KEY must be at least 32 characters long for security. "
-        "Generate a secure key with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+        "SECRET_KEY must be set in .env (32+ chars). "
+        "Generate with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
     )
 
 ALGORITHM = "HS256"
@@ -103,19 +101,6 @@ def rate_limit(key_prefix: str, limit: int = 60, window_seconds: int = 60):
         _RATE_BUCKETS[bucket_key] = count + 1
     return _limiter
 
-def rate_limit_public(key_prefix: str, limit: int = 60, window_seconds: int = 60):
-    """Dependency to rate limit actions per client IP per window.
-    Use for unauthenticated endpoints like /login.
-    """
-    def _limiter(request: Request):
-        from time import time
-        now = int(time())
-        window = now // window_seconds
-        client_ip = getattr(request.client, "host", "unknown")
-        bucket_key = f"{key_prefix}:{client_ip}:{window}"
-        count = _RATE_BUCKETS.get(bucket_key, 0)
-        if count >= limit:
-            raise HTTPException(status_code=429, detail="Rate limit exceeded")
-        _RATE_BUCKETS[bucket_key] = count + 1
-    return _limiter
+# Use Redis-backed rate limiter for login/refresh (distributed-safe)
+from utils.rate_limit import rate_limit_public
 

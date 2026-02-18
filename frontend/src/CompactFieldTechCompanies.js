@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import {
   Box, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Button, IconButton, Stack, TextField, InputAdornment, Typography
@@ -121,7 +121,14 @@ function CompactFieldTechCompanies() {
               {filteredCompanies.map((c) => (
                 <TableRow key={c.company_id} hover>
                   <TableCell>
-                    <Typography variant="subtitle2">{c.company_name}</Typography>
+                    <Link
+                      to={`/companies/${c.company_id}/edit`}
+                      style={{ textDecoration: 'none', color: 'inherit' }}
+                    >
+                      <Typography variant="subtitle2" sx={{ '&:hover': { textDecoration: 'underline' } }}>
+                        {c.company_name}
+                      </Typography>
+                    </Link>
                     <Typography variant="caption" color="text.secondary">
                       {c.company_number || ''}
                     </Typography>

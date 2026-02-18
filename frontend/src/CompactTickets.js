@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Chip, IconButton, Checkbox, Button, Stack, FormControl, Select, MenuItem,
@@ -20,6 +20,7 @@ import { canDelete } from './utils/permissions';
 
 function CompactTickets() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const api = useApi();
   const { tableHeaderBg, rowHoverBg } = useThemeTokens();
@@ -34,7 +35,29 @@ function CompactTickets() {
   const [total, setTotal] = useState(0);
   const [archivedCount, setArchivedCount] = useState(0);
   const [selected, setSelected] = useState(new Set());
-  const [filters, setFilters] = useState({ type: 'all', status: 'active', priority: 'all', search: '' });
+  const urlType = searchParams.get('type');
+  const urlStatus = searchParams.get('status');
+  const urlWorkflowState = searchParams.get('workflow_state');
+  const [filters, setFilters] = useState({
+    type: urlType && ['onsite', 'inhouse', 'nro', 'projects', 'misc'].includes(urlType) ? urlType : 'all',
+    status: urlStatus ? urlStatus : 'active',
+    workflow_state: urlWorkflowState || 'all',
+    priority: 'all',
+    search: ''
+  });
+  // Sync filters when URL params change (e.g. from dashboard links)
+  useEffect(() => {
+    const t = searchParams.get('type');
+    const s = searchParams.get('status');
+    const ws = searchParams.get('workflow_state');
+    setFilters(prev => ({
+      ...prev,
+      type: t && ['onsite', 'inhouse', 'nro', 'projects', 'misc'].includes(t) ? t : prev.type,
+      status: s || prev.status,
+      workflow_state: ws || prev.workflow_state
+    }));
+    setPage(0);
+  }, [searchParams]);
   const [searchInput, setSearchInput] = useState('');
   const searchDebounceRef = useRef(null);
   const [columnAnchor, setColumnAnchor] = useState(null);
@@ -61,11 +84,13 @@ function CompactTickets() {
       params.set('skip', String(page * rowsPerPage));
       if (filters.type !== 'all') params.set('ticket_type', filters.type);
       if (filters.status !== 'all') params.set('status', filters.status === 'active' ? '' : filters.status);
+      if (filters.workflow_state && filters.workflow_state !== 'all') params.set('workflow_state', filters.workflow_state);
       if (filters.priority !== 'all') params.set('priority', filters.priority);
       if (filters.search) params.set('search', filters.search);
       // Fetch archived count first
       const archivedParams = new URLSearchParams();
       if (filters.type !== 'all') archivedParams.set('ticket_type', filters.type);
+      if (filters.workflow_state && filters.workflow_state !== 'all') archivedParams.set('workflow_state', filters.workflow_state);
       if (filters.priority !== 'all') archivedParams.set('priority', filters.priority);
       if (filters.search) archivedParams.set('search', filters.search);
       archivedParams.set('status', 'archived');
@@ -78,6 +103,7 @@ function CompactTickets() {
       const countParams = new URLSearchParams();
       if (filters.type !== 'all') countParams.set('ticket_type', filters.type);
       if (filters.status !== 'all' && filters.status !== 'active') countParams.set('status', filters.status);
+      if (filters.workflow_state && filters.workflow_state !== 'all') countParams.set('workflow_state', filters.workflow_state);
       if (filters.priority !== 'all') countParams.set('priority', filters.priority);
       if (filters.search) countParams.set('search', filters.search);
       const countRes = await apiRef.current.get(`/tickets/count?${countParams.toString()}`);
@@ -88,7 +114,12 @@ function CompactTickets() {
       setTotal(activeCount);
       
       const response = await apiRef.current.get(`/tickets/?${params.toString()}`);
-      setTickets((response || []).filter(t => t.status !== 'archived'));
+      // When filtering by archived, keep them; otherwise exclude from list
+      setTickets(
+        filters.status === 'archived'
+          ? (response || [])
+          : (response || []).filter(t => t.status !== 'archived')
+      );
     } catch (err) {
       showError('Failed to load tickets');
     } finally {
@@ -111,7 +142,7 @@ function CompactTickets() {
   useEffect(() => {
     fetchTickets();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [updateTrigger, page, rowsPerPage, filters.type, filters.status, filters.priority, filters.search]);
+  }, [updateTrigger, page, rowsPerPage, filters.type, filters.status, filters.workflow_state, filters.priority, filters.search]);
 
   const filtered = useMemo(() => {
     let result = tickets;
@@ -120,6 +151,7 @@ function CompactTickets() {
     if (filters.status === 'active') result = result.filter(t => t.status !== 'archived');
     else if (filters.status === 'completed') result = result.filter(t => t.status === 'archived');
     else if (filters.status !== 'all') result = result.filter(t => t.status === filters.status);
+    if (filters.workflow_state && filters.workflow_state !== 'all') result = result.filter(t => t.workflow_state === filters.workflow_state);
     if (filters.priority !== 'all') result = result.filter(t => t.priority === filters.priority);
     // server-side search now
     
@@ -232,6 +264,7 @@ function CompactTickets() {
               <MenuItem value="all">All Types</MenuItem>
               <MenuItem value="inhouse">Inhouse</MenuItem>
               <MenuItem value="onsite">Onsite</MenuItem>
+              <MenuItem value="nro">NRO</MenuItem>
               <MenuItem value="projects">Projects</MenuItem>
             </Select>
           </FormControl>
@@ -241,8 +274,30 @@ function CompactTickets() {
               <MenuItem value="active">Active</MenuItem>
               <MenuItem value="all">All</MenuItem>
               <MenuItem value="open">Open</MenuItem>
-              <MenuItem value="in_progress">In Progress</MenuItem>
               <MenuItem value="completed">Completed</MenuItem>
+              <MenuItem value="archived">Archived</MenuItem>
+            </Select>
+          </FormControl>
+
+          <FormControl size="small" sx={{ minWidth: 150 }}>
+            <Select value={filters.workflow_state} onChange={(e) => setFilters(f => ({ ...f, workflow_state: e.target.value }))} sx={{ fontSize: '0.875rem', height: 32 }}>
+              <MenuItem value="all">All Workflow</MenuItem>
+              <MenuItem value="new">New</MenuItem>
+              <MenuItem value="scheduled">Scheduled</MenuItem>
+              <MenuItem value="claimed">Claimed</MenuItem>
+              <MenuItem value="onsite">Onsite</MenuItem>
+              <MenuItem value="offsite">Offsite</MenuItem>
+              <MenuItem value="followup_required">Follow Up</MenuItem>
+              <MenuItem value="needstech">Needs Tech</MenuItem>
+              <MenuItem value="goback_required">Go Back</MenuItem>
+              <MenuItem value="pending_dispatch_review">Pending Dispatch Review</MenuItem>
+              <MenuItem value="pending_approval">Pending Approval</MenuItem>
+              <MenuItem value="nro_phase1_scheduled">NRO Phase 1 Scheduled</MenuItem>
+              <MenuItem value="nro_phase1_complete_pending_phase2">NRO Phase 1 Complete</MenuItem>
+              <MenuItem value="nro_phase1_goback_required">NRO P1 Go Back</MenuItem>
+              <MenuItem value="nro_phase2_scheduled">NRO Phase 2 Scheduled</MenuItem>
+              <MenuItem value="nro_phase2_goback_required">NRO P2 Go Back</MenuItem>
+              <MenuItem value="nro_ready_for_completion">NRO Ready Completion</MenuItem>
             </Select>
           </FormControl>
           

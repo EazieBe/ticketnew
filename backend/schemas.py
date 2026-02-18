@@ -1,4 +1,5 @@
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
+import re
 from typing import Optional, List
 from datetime import date, datetime
 import enum
@@ -165,6 +166,7 @@ class EquipmentOut(EquipmentBase):
 class TicketType(str, enum.Enum):
     inhouse = 'inhouse'
     onsite = 'onsite'
+    nro = 'nro'
     projects = 'projects'
     misc = 'misc'
 
@@ -186,12 +188,33 @@ class TicketPriority(str, enum.Enum):
     critical = 'critical'
     emergency = 'emergency'
 
+class TicketWorkflowState(str, enum.Enum):
+    new = 'new'
+    scheduled = 'scheduled'
+    claimed = 'claimed'
+    onsite = 'onsite'
+    offsite = 'offsite'
+    followup_required = 'followup_required'
+    needstech = 'needstech'
+    goback_required = 'goback_required'
+    pending_dispatch_review = 'pending_dispatch_review'
+    pending_approval = 'pending_approval'
+    ready_to_archive = 'ready_to_archive'
+    nro_phase1_scheduled = 'nro_phase1_scheduled'
+    nro_phase1_complete_pending_phase2 = 'nro_phase1_complete_pending_phase2'
+    nro_phase1_goback_required = 'nro_phase1_goback_required'
+    nro_phase2_scheduled = 'nro_phase2_scheduled'
+    nro_phase2_goback_required = 'nro_phase2_goback_required'
+    nro_ready_for_completion = 'nro_ready_for_completion'
+
 class TicketBase(BaseModel):
     site_id: str
     inc_number: Optional[str] = None
     so_number: Optional[str] = None
     type: TicketType = TicketType.onsite
     status: Optional[TicketStatus] = TicketStatus.open
+    workflow_state: Optional[TicketWorkflowState] = TicketWorkflowState.new
+    ticket_version: Optional[int] = 1
     priority: Optional[TicketPriority] = TicketPriority.normal
     category: Optional[str] = None
     assigned_user_id: Optional[str] = None
@@ -240,6 +263,12 @@ class TicketBase(BaseModel):
     workflow_step: Optional[str] = 'created'
     next_action_required: Optional[str] = None
     due_date: Optional[datetime] = None
+    nro_phase1_scheduled_date: Optional[date] = None
+    nro_phase1_completed_at: Optional[datetime] = None
+    nro_phase1_state: Optional[str] = None
+    nro_phase2_scheduled_date: Optional[date] = None
+    nro_phase2_completed_at: Optional[datetime] = None
+    nro_phase2_state: Optional[str] = None
     is_urgent: Optional[bool] = False
     is_vip: Optional[bool] = False
     customer_name: Optional[str] = None
@@ -260,8 +289,34 @@ class TicketBase(BaseModel):
     follow_up_date: Optional[date] = None
     follow_up_notes: Optional[str] = None
 
+    @field_validator(
+        "inc_number",
+        "so_number",
+        "category",
+        "notes",
+        "special_flag",
+        "next_action_required",
+        "customer_name",
+        "customer_phone",
+        "customer_email",
+        "equipment_affected",
+        "parts_needed",
+        "follow_up_notes",
+        mode="before",
+    )
+    @classmethod
+    def normalize_text_fields(cls, v):
+        if v is None:
+            return v
+        if not isinstance(v, str):
+            return v
+        # Remove control chars except tabs/newlines and trim overall whitespace.
+        cleaned = re.sub(r"[^\x20-\x7E\t\r\n]", "", v).strip()
+        # Collapse repeated internal spaces on short identifier/category fields.
+        return cleaned
+
 class TicketCreate(TicketBase):
-    pass
+    model_config = ConfigDict(extra="forbid")
 
 class TicketUpdate(BaseModel):
     site_id: Optional[str] = None
@@ -269,6 +324,9 @@ class TicketUpdate(BaseModel):
     so_number: Optional[str] = None
     type: Optional[TicketType] = None
     status: Optional[TicketStatus] = None
+    workflow_state: Optional[TicketWorkflowState] = None
+    ticket_version: Optional[int] = None
+    expected_ticket_version: Optional[int] = None
     priority: Optional[TicketPriority] = None
     category: Optional[str] = None
     assigned_user_id: Optional[str] = None
@@ -317,6 +375,12 @@ class TicketUpdate(BaseModel):
     workflow_step: Optional[str] = None
     next_action_required: Optional[str] = None
     due_date: Optional[datetime] = None
+    nro_phase1_scheduled_date: Optional[date] = None
+    nro_phase1_completed_at: Optional[datetime] = None
+    nro_phase1_state: Optional[str] = None
+    nro_phase2_scheduled_date: Optional[date] = None
+    nro_phase2_completed_at: Optional[datetime] = None
+    nro_phase2_state: Optional[str] = None
     is_urgent: Optional[bool] = None
     is_vip: Optional[bool] = None
     customer_name: Optional[str] = None
@@ -336,6 +400,39 @@ class TicketUpdate(BaseModel):
     follow_up_required: Optional[bool] = None
     follow_up_date: Optional[date] = None
     follow_up_notes: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator(
+        "inc_number",
+        "so_number",
+        "category",
+        "notes",
+        "special_flag",
+        "next_action_required",
+        "customer_name",
+        "customer_phone",
+        "customer_email",
+        "equipment_affected",
+        "parts_needed",
+        "follow_up_notes",
+        mode="before",
+    )
+    @classmethod
+    def normalize_text_fields(cls, v):
+        if v is None or not isinstance(v, str):
+            return v
+        return re.sub(r"[^\x20-\x7E\t\r\n]", "", v).strip()
+
+    @field_validator("expected_ticket_version", mode="before")
+    @classmethod
+    def validate_expected_version(cls, v):
+        if v is None:
+            return v
+        iv = int(v)
+        if iv < 1:
+            raise ValueError("expected_ticket_version must be >= 1")
+        return iv
 
 class TicketOut(TicketBase):
     ticket_id: str
@@ -503,8 +600,18 @@ class TaskBase(BaseModel):
 class TaskCreate(TaskBase):
     pass
 
+
+class TaskAssignedUserOut(BaseModel):
+    """Minimal user info for task list."""
+    user_id: str
+    name: str
+    model_config = ConfigDict(from_attributes=True)
+
+
 class TaskOut(TaskBase):
-    task_id: str 
+    task_id: str
+    assigned_user: Optional[TaskAssignedUserOut] = None
+    model_config = ConfigDict(from_attributes=True) 
 
 class TicketCommentBase(BaseModel):
     comment: str
@@ -578,6 +685,34 @@ class StatusUpdate(BaseModel):
 class BulkTicketStatusUpdate(BaseModel):
     ticket_ids: List[str]
     status: TicketStatus
+
+class WorkflowTransitionRequest(BaseModel):
+    workflow_state: TicketWorkflowState
+    expected_ticket_version: Optional[int] = None
+    convert_to_type: Optional[TicketType] = None
+    notes: Optional[str] = None
+    schedule_date: Optional[date] = None
+    follow_up_date: Optional[date] = None
+    follow_up_notes: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("notes", "follow_up_notes", mode="before")
+    @classmethod
+    def clean_notes(cls, v):
+        if v is None or not isinstance(v, str):
+            return v
+        return re.sub(r"[^\x20-\x7E\t\r\n]", "", v).strip()
+
+    @field_validator("expected_ticket_version", mode="before")
+    @classmethod
+    def validate_expected_version(cls, v):
+        if v is None:
+            return v
+        iv = int(v)
+        if iv < 1:
+            raise ValueError("expected_ticket_version must be >= 1")
+        return iv
 
 class TicketClaim(BaseModel):
     claimed_by: str

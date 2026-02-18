@@ -1,5 +1,6 @@
 import logging
 from fastapi import FastAPI, Depends, HTTPException, status, BackgroundTasks, WebSocket, Query, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -57,8 +58,36 @@ app = FastAPI(
     title="Ticketing System API",
     description="A comprehensive ticketing system for field operations",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Standardize HTTP error responses."""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail, "status_code": exc.status_code},
+    )
+
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception):
+    """Catch-all: return 500 with safe message, log full error."""
+    # SQLAlchemy / DB errors
+    if "sqlalchemy" in type(exc).__module__ or "psycopg" in type(exc).__module__:
+        logger.exception("Database error: %s", exc)
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "A database error occurred. Please try again.", "status_code": 500},
+        )
+    logger.exception("Unhandled exception: %s", exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An internal error occurred. Please try again.", "status_code": 500},
+    )
 
 
 def _latency_bucket(request: Request) -> str:
@@ -82,7 +111,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -164,7 +193,7 @@ async def get_redis() -> Redis | None:
 def login_form(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
-    _rl: None = Depends(rate_limit_public("login", limit=10, window_seconds=60))
+    _rl: None = Depends(rate_limit_public("login", limit=settings.RATE_LIMIT_LOGIN_PER_MINUTE, window_seconds=60))
 ):
     """Login endpoint (OAuth2 form)"""
     user = crud.get_user_by_email(db, email=form_data.username)
@@ -191,7 +220,7 @@ def login_form(
 def login_json(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
-    _rl: None = Depends(rate_limit_public("login", limit=10, window_seconds=60))
+    _rl: None = Depends(rate_limit_public("login", limit=settings.RATE_LIMIT_LOGIN_PER_MINUTE, window_seconds=60))
 ):
     """Login endpoint (form-encoded for frontend)"""
     user = crud.get_user_by_email(db, email=form_data.username)

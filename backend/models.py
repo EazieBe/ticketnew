@@ -41,22 +41,6 @@ class User(Base):
     audits = relationship('TicketAudit', back_populates='user')
     inventory_transactions = relationship('InventoryTransaction', back_populates='user')
 
-class FieldTechCompany(Base):
-    """One company address; techs under this company use this address for map."""
-    __tablename__ = 'field_tech_companies'
-    company_id = Column(String, primary_key=True, index=True)
-    company_name = Column(String, nullable=False)
-    company_number = Column(String)
-    address = Column(String)
-    city = Column(String)
-    state = Column(String)
-    zip = Column(String)
-    region = Column(String)  # Derived from state for map filter
-    notes = Column(Text)
-    service_radius_miles = Column(Integer)  # Default service area radius from this address (e.g. 50, 100)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    techs = relationship('FieldTech', back_populates='company', foreign_keys='FieldTech.company_id')
-
 class FieldTech(Base):
     __tablename__ = 'field_techs'
     field_tech_id = Column(String, primary_key=True, index=True)
@@ -133,6 +117,7 @@ class Equipment(Base):
 class TicketType(enum.Enum):
     inhouse = 'inhouse'
     onsite = 'onsite'
+    nro = 'nro'
     projects = 'projects'
     misc = 'misc'
 
@@ -154,6 +139,25 @@ class TicketPriority(enum.Enum):
     critical = 'critical'
     emergency = 'emergency'
 
+class TicketWorkflowState(enum.Enum):
+    new = 'new'
+    scheduled = 'scheduled'
+    claimed = 'claimed'
+    onsite = 'onsite'
+    offsite = 'offsite'
+    followup_required = 'followup_required'
+    needstech = 'needstech'
+    goback_required = 'goback_required'
+    pending_dispatch_review = 'pending_dispatch_review'
+    pending_approval = 'pending_approval'
+    ready_to_archive = 'ready_to_archive'
+    nro_phase1_scheduled = 'nro_phase1_scheduled'
+    nro_phase1_complete_pending_phase2 = 'nro_phase1_complete_pending_phase2'
+    nro_phase1_goback_required = 'nro_phase1_goback_required'
+    nro_phase2_scheduled = 'nro_phase2_scheduled'
+    nro_phase2_goback_required = 'nro_phase2_goback_required'
+    nro_ready_for_completion = 'nro_ready_for_completion'
+
 class Ticket(Base):
     __tablename__ = 'tickets'
     ticket_id = Column(String, primary_key=True, index=True)
@@ -162,6 +166,8 @@ class Ticket(Base):
     so_number = Column(String)
     type = Column(Enum(TicketType), nullable=False, default=TicketType.onsite)
     status = Column(Enum(TicketStatus), default=TicketStatus.open)
+    workflow_state = Column(String, nullable=False, default=TicketWorkflowState.new.value)
+    ticket_version = Column(Integer, nullable=False, default=1)
     priority = Column(Enum(TicketPriority), default=TicketPriority.normal)
     category = Column(String)
     assigned_user_id = Column(String, ForeignKey('users.user_id'))
@@ -211,6 +217,13 @@ class Ticket(Base):
     workflow_step = Column(String, default='created')  # Current workflow step
     next_action_required = Column(String)  # What needs to happen next
     due_date = Column(DateTime)  # When action is due
+    # NRO two-phase scheduling fields
+    nro_phase1_scheduled_date = Column(Date)
+    nro_phase1_completed_at = Column(DateTime(timezone=True))
+    nro_phase1_state = Column(String)
+    nro_phase2_scheduled_date = Column(Date)
+    nro_phase2_completed_at = Column(DateTime(timezone=True))
+    nro_phase2_state = Column(String)
     is_urgent = Column(Boolean, default=False)  # Urgent flag
     is_vip = Column(Boolean, default=False)  # VIP customer flag
     customer_name = Column(String)  # Customer contact name

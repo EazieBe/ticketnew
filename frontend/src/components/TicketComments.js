@@ -15,6 +15,7 @@ import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import { getBestTimestamp } from '../utils/timezone';
 import { TimestampDisplay } from './TimestampDisplay';
+import { sanitizeInput } from '../utils/security';
 
 dayjs.extend(relativeTime);
 
@@ -301,7 +302,7 @@ function TicketComments({ ticketId, onCommentUpdate, isDeleting = false }) {
                           color="text.primary"
                           sx={{ whiteSpace: 'pre-wrap' }}
                         >
-                          {comment.comment}
+                          {sanitizeInput(comment.comment)}
                         </Typography>
                       }
                     />

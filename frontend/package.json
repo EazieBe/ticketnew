@@ -25,6 +25,7 @@
     "recharts": "^2.8.0",
     "socket.io-client": "^4.7.4",
     "web-vitals": "^3.5.0",
+    "wl-msg-reader": "^0.2.1",
     "xlsx": "^0.18.5"
   },
   "scripts": {

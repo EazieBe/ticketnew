@@ -341,6 +341,8 @@ def create_ticket(db: Session, ticket: schemas.TicketCreate):
         so_number=ticket.so_number,
         type=ticket.type,
         status=ticket.status,
+        workflow_state=(ticket.workflow_state.value if getattr(ticket.workflow_state, "value", None) else (ticket.workflow_state or models.TicketWorkflowState.new.value)),
+        ticket_version=(ticket.ticket_version or 1),
         priority=ticket.priority,
         category=ticket.category,
         assigned_user_id=ticket.assigned_user_id,
@@ -385,6 +387,12 @@ def create_ticket(db: Session, ticket: schemas.TicketCreate):
         workflow_step=ticket.workflow_step,
         next_action_required=ticket.next_action_required,
         due_date=ticket.due_date,
+        nro_phase1_scheduled_date=ticket.nro_phase1_scheduled_date,
+        nro_phase1_completed_at=ticket.nro_phase1_completed_at,
+        nro_phase1_state=ticket.nro_phase1_state,
+        nro_phase2_scheduled_date=ticket.nro_phase2_scheduled_date,
+        nro_phase2_completed_at=ticket.nro_phase2_completed_at,
+        nro_phase2_state=ticket.nro_phase2_state,
         is_urgent=ticket.is_urgent,
         is_vip=ticket.is_vip,
         customer_name=ticket.customer_name,
@@ -398,6 +406,7 @@ def create_ticket(db: Session, ticket: schemas.TicketCreate):
         # Quality and Follow-up
         quality_score=ticket.quality_score,
         customer_satisfaction=ticket.customer_satisfaction,
+        tech_rating=ticket.tech_rating,
         follow_up_required=ticket.follow_up_required,
         follow_up_date=ticket.follow_up_date,
         follow_up_notes=ticket.follow_up_notes
@@ -433,6 +442,7 @@ def get_ticket_for_response(db: Session, ticket_id: str):
 
 def get_tickets(db: Session, skip: int = 0, limit: int = 100, 
                 status: Optional[str] = None, 
+                workflow_state: Optional[str] = None,
                 priority: Optional[str] = None,
                 assigned_user_id: Optional[str] = None,
                 site_id: Optional[str] = None,
@@ -466,6 +476,8 @@ def get_tickets(db: Session, skip: int = 0, limit: int = 100,
                 query = query.filter(models.Ticket.status == enum_status)
             except Exception:
                 query = query.filter(models.Ticket.status == status)
+    if workflow_state:
+        query = query.filter(models.Ticket.workflow_state == workflow_state)
     if priority:
         query = query.filter(models.Ticket.priority == priority)
     if assigned_user_id:
@@ -492,6 +504,7 @@ def get_tickets(db: Session, skip: int = 0, limit: int = 100,
 
 def count_tickets(db: Session,
                   status: Optional[str] = None,
+                  workflow_state: Optional[str] = None,
                   priority: Optional[str] = None,
                   assigned_user_id: Optional[str] = None,
                   site_id: Optional[str] = None,
@@ -512,6 +525,8 @@ def count_tickets(db: Session,
                 query = query.filter(models.Ticket.status == enum_status)
             except Exception:
                 query = query.filter(models.Ticket.status == status)
+    if workflow_state:
+        query = query.filter(models.Ticket.workflow_state == workflow_state)
     if priority:
         query = query.filter(models.Ticket.priority == priority)
     if assigned_user_id:
@@ -938,6 +953,7 @@ def delete_field_tech(db: Session, field_tech_id: str):
 # Task CRUD - Optimized
 def create_task(db: Session, task: schemas.TaskCreate):
     """Create task with optimized query"""
+    now = datetime.now(timezone.utc)
     db_task = models.Task(
         task_id=generate_sequential_id(db, models.Task, 'task_id', 'TASK', 6),
         ticket_id=task.ticket_id,
@@ -945,7 +961,8 @@ def create_task(db: Session, task: schemas.TaskCreate):
         status=task.status if task.status else models.TaskStatus.open,
         assigned_user_id=task.assigned_user_id,
         due_date=task.due_date,
-        created_at=datetime.now(timezone.utc)
+        created_at=now,
+        updated_at=now,
     )
     db.add(db_task)
     db.commit()
@@ -984,9 +1001,12 @@ def update_task(db: Session, task_id: str, task: schemas.TaskCreate):
     if not db_task:
         return None
     
-    # Update fields dynamically
+    # Optional FK fields that can be cleared (set to None)
+    nullable_fks = frozenset({'ticket_id', 'assigned_user_id'})
     for field, value in task.model_dump(exclude_unset=True).items():
-        if hasattr(db_task, field) and value is not None:
+        if not hasattr(db_task, field):
+            continue
+        if value is not None or (field in nullable_fks):
             setattr(db_task, field, value)
     
     db_task.updated_at = datetime.now(timezone.utc)

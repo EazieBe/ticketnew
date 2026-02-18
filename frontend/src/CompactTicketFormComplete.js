@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box, Paper, Grid, TextField, Button, FormControl, InputLabel, Select, MenuItem,
-  Typography, Stack, Autocomplete, Tabs, Tab, Switch, FormControlLabel, Alert
+  Typography, Stack, Autocomplete, Tabs, Tab, Switch, FormControlLabel, Alert, Tooltip
 } from '@mui/material';
-import { Save, Cancel } from '@mui/icons-material';
+import { Save, Cancel, Email } from '@mui/icons-material';
 import useApi from './hooks/useApi';
+import { parseEmailFile, emailToTicketFields } from './utils/emailParser';
 import useThemeTokens from './hooks/useThemeTokens';
 
 function CompactTicketFormComplete({ onSubmit, initialValues, isEdit }) {
@@ -40,6 +41,8 @@ function CompactTicketFormComplete({ onSubmit, initialValues, isEdit }) {
   const [siteOpen, setSiteOpen] = useState(false);
   const [users, setUsers] = useState([]);
   const [fieldTechs, setFieldTechs] = useState([]);
+  const [emailDropOver, setEmailDropOver] = useState(false);
+  const [emailParseError, setEmailParseError] = useState(null);
 
   // Keep API ref current
   React.useEffect(() => {
@@ -139,6 +142,35 @@ function CompactTicketFormComplete({ onSubmit, initialValues, isEdit }) {
 
   const c = (field, value) => setValues({ ...values, [field]: value });
 
+  const handleEmailDrop = async (e) => {
+    e.preventDefault();
+    setEmailDropOver(false);
+    setEmailParseError(null);
+    const files = e.dataTransfer?.files;
+    if (!files?.length) return;
+    const file = files[0];
+    const name = (file.name || '').toLowerCase();
+    if (!name.endsWith('.eml') && !name.endsWith('.msg')) {
+      setEmailParseError('Use .eml or .msg file. Save the email first, then drag it here.');
+      return;
+    }
+    try {
+      const parsed = await parseEmailFile(file);
+      const fields = emailToTicketFields(parsed);
+      setValues(prev => ({
+        ...prev,
+        notes: prev.notes ? `${prev.notes}\n\n--- From email ---\n${fields.notes}` : fields.notes,
+        site_id: fields.site_id || prev.site_id,
+        inc_number: fields.inc_number || prev.inc_number,
+        so_number: fields.so_number || prev.so_number,
+        date_scheduled: fields.date_scheduled || prev.date_scheduled
+      }));
+      if (fields.site_id) setSiteInput(`${fields.site_id} - `);
+    } catch (err) {
+      setEmailParseError(err?.message || 'Failed to parse email');
+    }
+  };
+
   return (
     <Paper sx={{ p: 2, maxHeight: '90vh', overflow: 'auto' }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
@@ -151,6 +183,35 @@ function CompactTicketFormComplete({ onSubmit, initialValues, isEdit }) {
         </Stack>
       </Stack>
 
+      {!isEdit && (
+        <Tooltip title="Outlook doesn't expose emails when dragging directly. Save the email as .msg or .eml (File → Save As), then drag that file here.">
+          <Box
+            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; setEmailDropOver(true); }}
+            onDragLeave={() => setEmailDropOver(false)}
+            onDrop={handleEmailDrop}
+            sx={{
+              p: 2,
+              mb: 2,
+              border: '2px dashed',
+              borderColor: emailDropOver ? 'primary.main' : 'divider',
+              borderRadius: 1,
+              bgcolor: emailDropOver ? 'action.hover' : 'action.selected',
+              cursor: 'default',
+              textAlign: 'center'
+            }}
+          >
+            <Email sx={{ fontSize: 32, color: 'text.secondary', mb: 1 }} />
+            <Typography variant="body2" color="text.secondary">
+              Drag .msg or .eml file here to load email (Subject, From, body → Notes; INC/SO numbers auto-detected)
+            </Typography>
+            {emailParseError && (
+              <Alert severity="error" sx={{ mt: 1 }} onClose={() => setEmailParseError(null)}>
+                {emailParseError}
+              </Alert>
+            )}
+          </Box>
+        </Tooltip>
+      )}
       <Tabs value={activeTab} onChange={(e, v) => setActiveTab(v)} sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}>
         <Tab label="Basic" sx={{ minWidth: 80, fontSize: '0.875rem' }} />
         <Tab label="Assignment" sx={{ minWidth: 80, fontSize: '0.875rem' }} />
@@ -235,6 +296,7 @@ function CompactTicketFormComplete({ onSubmit, initialValues, isEdit }) {
                 <Select value={values.type} onChange={(e) => c('type', e.target.value)} label="Type" sx={{ fontSize: '0.875rem' }}>
                   <MenuItem value="inhouse">Inhouse</MenuItem>
                   <MenuItem value="onsite">Onsite</MenuItem>
+                  <MenuItem value="nro">NRO</MenuItem>
                   <MenuItem value="projects">Projects</MenuItem>
                   <MenuItem value="misc">Misc</MenuItem>
                 </Select>
@@ -245,15 +307,7 @@ function CompactTicketFormComplete({ onSubmit, initialValues, isEdit }) {
                 <InputLabel sx={{ fontSize: '0.875rem' }}>Status</InputLabel>
                 <Select value={values.status} onChange={(e) => c('status', e.target.value)} label="Status" sx={{ fontSize: '0.875rem' }}>
                   <MenuItem value="open">Open</MenuItem>
-                  <MenuItem value="scheduled">Scheduled</MenuItem>
-                  <MenuItem value="checked_in">Checked In</MenuItem>
-                  <MenuItem value="in_progress">In Progress</MenuItem>
-                  <MenuItem value="pending">Pending</MenuItem>
-                  <MenuItem value="needs_parts">Needs Parts</MenuItem>
-                  <MenuItem value="go_back_scheduled">Go Back Scheduled</MenuItem>
                   <MenuItem value="completed">Completed</MenuItem>
-                  <MenuItem value="closed">Closed</MenuItem>
-                  <MenuItem value="approved">Approved</MenuItem>
                   <MenuItem value="archived">Archived</MenuItem>
                 </Select>
               </FormControl>
