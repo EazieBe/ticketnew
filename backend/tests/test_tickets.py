@@ -278,3 +278,39 @@ def test_ticket_audits_endpoint(auth_headers, ensure_test_site, test_site_id):
     assert isinstance(data, list)
     assert len(data) >= 1
     assert all(a.get("ticket_id") == ticket_id for a in data)
+
+
+def test_mark_return_received(auth_headers, ensure_test_site, test_site_id):
+    """Dispatcher/admin can mark expected returns received."""
+    create_resp = client.post(
+        "/tickets/",
+        json={"site_id": test_site_id, "type": "onsite", "status": "open"},
+        headers=auth_headers,
+    )
+    assert create_resp.status_code == 200, create_resp.text
+    created = create_resp.json()
+    ticket_id = created["ticket_id"]
+    version = created.get("ticket_version") or 1
+
+    followup_resp = client.post(
+        f"/tickets/{ticket_id}/workflow-transition",
+        json={
+            "workflow_state": "followup_required",
+            "expected_ticket_version": version,
+            "follow_up_date": "2026-03-15",
+            "follow_up_notes": "Waiting on return shipment",
+        },
+        headers=auth_headers,
+    )
+    assert followup_resp.status_code == 200, followup_resp.text
+    fv = followup_resp.json().get("ticket_version")
+
+    mark_resp = client.post(
+        f"/tickets/{ticket_id}/returns/received",
+        json={"expected_ticket_version": fv, "notes": "Return unit arrived"},
+        headers=auth_headers,
+    )
+    assert mark_resp.status_code == 200, mark_resp.text
+    data = mark_resp.json()
+    assert data.get("parts_received") is True
+    assert data.get("follow_up_required") is False

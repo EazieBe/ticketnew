@@ -19,6 +19,7 @@ import {
   Menu,
   MenuItem,
   Badge,
+  Chip,
   Tooltip,
   Breadcrumbs,
   Link,
@@ -557,7 +558,8 @@ const cleanFormData = (data) => {
     'item_id', 'ticket_id', 'assigned_user_id', 'charges_out', 'charges_in', 'parts_cost', 'total_cost',
     'date_shipped', 'date_returned', 'date_created', 'date_scheduled', 'date_closed', 'due_date',
     'time_spent', 'sla_target_hours', 'sla_breach_hours', 'escalation_level',
-    'estimated_hours', 'actual_hours', 'billing_rate', 'quality_score'
+    'estimated_hours', 'actual_hours', 'billing_rate', 'quality_score',
+    'follow_up_date', 'nro_phase1_scheduled_date', 'nro_phase2_scheduled_date'
   ];
   for (const [key, value] of Object.entries(data)) {
     if (ticketNullIfEmpty.includes(key)) {
@@ -570,6 +572,33 @@ const cleanFormData = (data) => {
   return cleaned;
 };
 
+// Ticket update/create payloads must exclude relation-only fields returned by GET /tickets/{id}
+// because backend write schemas use extra="forbid".
+const stripTicketReadOnlyFields = (data) => {
+  const cleaned = { ...(data || {}) };
+  const forbidden = [
+    'ticket_id',
+    'created_at',
+    'site',
+    'assigned_user',
+    'claimed_user',
+    'onsite_tech',
+    'last_updated_user',
+    'approved_user',
+    'audits',
+    'tasks',
+    'shipments',
+    'inventory_transactions',
+    'comments',
+    'time_entries',
+    'attachments',
+  ];
+  for (const key of forbidden) {
+    if (key in cleaned) delete cleaned[key];
+  }
+  return cleaned;
+};
+
 function CompactTicketFormWrapper() {
   const navigate = useNavigate();
   const api = useApi();
@@ -577,7 +606,7 @@ function CompactTicketFormWrapper() {
   
   const handleSubmit = async (values) => {
     try {
-      const cleanedData = cleanFormData(values);
+      const cleanedData = stripTicketReadOnlyFields(cleanFormData(values));
       await api.post('/tickets/', cleanedData);
       success('Ticket created');
       navigate('/tickets');
@@ -613,7 +642,7 @@ function CompactTicketEditWrapper() {
   
   const handleSubmit = async (values) => {
     try {
-      const cleanedData = cleanFormData(values);
+      const cleanedData = stripTicketReadOnlyFields(cleanFormData(values));
       // Optimistic concurrency: prevent silent overwrites from stale edit forms.
       cleanedData.expected_ticket_version = ticket?.ticket_version ?? values?.ticket_version ?? 1;
       await api.put(`/tickets/${ticket_id}`, cleanedData);
@@ -1407,6 +1436,8 @@ function AppLayout() {
 
   const location = useLocation();
   const navigate = useNavigate();
+  const runtimeModeLabel = process.env.NODE_ENV === 'development' ? 'DEV' : 'PROD';
+  const runtimeModeColor = process.env.NODE_ENV === 'development' ? 'success' : 'warning';
 
   const theme = createAppTheme(darkMode, selectedColorTheme);
 
@@ -1729,6 +1760,16 @@ function AppLayout() {
             </Box>
 
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Tooltip title={`Runtime mode: ${runtimeModeLabel}`}>
+                <Chip
+                  label={runtimeModeLabel}
+                  size="small"
+                  color={runtimeModeColor}
+                  variant="outlined"
+                  sx={{ fontWeight: 700 }}
+                />
+              </Tooltip>
+
               {/* Notifications */}
               <Tooltip title="Notifications">
                 <IconButton

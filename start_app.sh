@@ -103,25 +103,40 @@ wait_for_service() {
     return 1
 }
 
-# Get the script directory
+# Get the script directory (project root)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+PROJECT_ROOT="$SCRIPT_DIR"
+BACKEND_DIR="$PROJECT_ROOT/backend"
+FRONTEND_DIR="$PROJECT_ROOT/frontend"
 
-print_status "Working directory: $SCRIPT_DIR"
+cd "$PROJECT_ROOT"
+
+print_status "Working directory: $PROJECT_ROOT"
+
+# Mode selection
+# ENV=dev (or APP_MODE=dev): backend --reload + frontend npm start (HMR)
+# default/prod: backend workers + frontend serve build
+APP_MODE="${APP_MODE:-$ENV}"
+if [ "$APP_MODE" = "dev" ]; then
+    APP_MODE="dev"
+else
+    APP_MODE="prod"
+fi
+print_status "Startup mode: $APP_MODE"
 
 # Kill any existing processes on our target ports
 kill_port 8000 "Backend"
 kill_port 3000 "Frontend"
 
 # Check if virtual environment exists
-if [ ! -d "venv" ]; then
+if [ ! -d "$PROJECT_ROOT/venv" ]; then
     print_error "Virtual environment not found. Please run: python3 -m venv venv"
     exit 1
 fi
 
 # Activate virtual environment
 print_status "Activating virtual environment..."
-source venv/bin/activate
+source "$PROJECT_ROOT/venv/bin/activate"
 
 # Install/update Python dependencies
 print_status "Checking Python dependencies..."
@@ -129,16 +144,16 @@ pip install -r requirements.txt >/dev/null 2>&1 || print_warning "Could not inst
 
 # Start backend server
 print_status "Starting backend server on port 8000..."
-cd backend
-# Use workers in production; default 2. Set ENV=dev to enable reload instead.
-if [ "$ENV" = "dev" ]; then
-  uvicorn main:app --host 0.0.0.0 --port 8000 --reload >/dev/null 2>&1 &
+cd "$BACKEND_DIR"
+BACKEND_LOG="$PROJECT_ROOT/backend_uvicorn.log"
+if [ "$APP_MODE" = "dev" ]; then
+  uvicorn main:app --host 0.0.0.0 --port 8000 --reload >"$BACKEND_LOG" 2>&1 &
 else
   WORKERS=${BACKEND_WORKERS:-2}
-  uvicorn main:app --host 0.0.0.0 --port 8000 --workers $WORKERS >/dev/null 2>&1 &
+  uvicorn main:app --host 0.0.0.0 --port 8000 --workers "$WORKERS" >"$BACKEND_LOG" 2>&1 &
 fi
 BACKEND_PID=$!
-cd ..
+cd "$PROJECT_ROOT"
 
 # Wait for backend to be ready
 if wait_for_service "localhost" 8000 "Backend API"; then
@@ -149,20 +164,28 @@ else
 fi
 
 # Check if frontend build exists
-if [ ! -d "frontend/build" ]; then
-    print_warning "Frontend build not found. Building frontend..."
-    cd frontend
-    npm install >/dev/null 2>&1
-    npm run build >/dev/null 2>&1
-    cd ..
-fi
-
 # Start frontend server
 print_status "Starting frontend server on port 3000..."
-cd frontend
-npx serve -s build -l 3000 --single >/dev/null 2>&1 &
-FRONTEND_PID=$!
-cd ..
+cd "$FRONTEND_DIR"
+FRONTEND_LOG="$PROJECT_ROOT/frontend_serve.log"
+if [ "$APP_MODE" = "dev" ]; then
+    # CRA dev server with HMR
+    if [ ! -d "node_modules" ]; then
+        print_status "Installing frontend dependencies..."
+        npm install
+    fi
+    BROWSER=none npm start >"$FRONTEND_LOG" 2>&1 &
+    FRONTEND_PID=$!
+else
+    if [ ! -d "build" ]; then
+        print_warning "Frontend build not found. Building frontend..."
+        npm install >/dev/null 2>&1 || true
+        npm run build
+    fi
+    npx serve -s build -l 3000 --single >"$FRONTEND_LOG" 2>&1 &
+    FRONTEND_PID=$!
+fi
+cd "$PROJECT_ROOT"
 
 # Wait for frontend to be ready
 if wait_for_service "localhost" 3000 "Frontend"; then
@@ -184,6 +207,9 @@ echo "   Backend API: http://192.168.43.50:8000"
 echo ""
 echo "🔧 To stop the application, run: ./stop_app.sh"
 echo "🔄 To restart the application, run: ./restart_app.sh"
+echo "🧭 Mode: $APP_MODE"
+echo "🪵 Backend log: $BACKEND_LOG"
+echo "🪵 Frontend log: $FRONTEND_LOG"
 echo ""
 echo "📊 Process IDs:"
 echo "   Backend: $BACKEND_PID"

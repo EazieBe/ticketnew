@@ -23,7 +23,9 @@ function CompactTicketFormComplete({ onSubmit, initialValues, isEdit }) {
     // Workflow fields
     estimated_hours: '', actual_hours: '', start_time: '', end_time: '', is_billable: true,
     requires_approval: false, approved_by: '', approved_at: '', rejection_reason: '',
-    workflow_step: 'created', next_action_required: '', due_date: '',
+    workflow_step: 'created', workflow_state: 'new', next_action_required: '', due_date: '',
+    nro_phase1_scheduled_date: '', nro_phase1_state: '',
+    nro_phase2_scheduled_date: '', nro_phase2_state: '',
     // SLA fields
     sla_target_hours: '', sla_breach_hours: '', escalation_level: 0,
     // Equipment/Parts
@@ -314,6 +316,30 @@ function CompactTicketFormComplete({ onSubmit, initialValues, isEdit }) {
             </Grid>
             <Grid item xs={6} md={3}>
               <FormControl fullWidth size="small">
+                <InputLabel sx={{ fontSize: '0.875rem' }}>Workflow</InputLabel>
+                <Select value={values.workflow_state || 'new'} onChange={(e) => c('workflow_state', e.target.value)} label="Workflow" sx={{ fontSize: '0.875rem' }}>
+                  <MenuItem value="new">New</MenuItem>
+                  <MenuItem value="scheduled">Scheduled</MenuItem>
+                  <MenuItem value="claimed">Claimed</MenuItem>
+                  <MenuItem value="onsite">Onsite</MenuItem>
+                  <MenuItem value="offsite">Offsite</MenuItem>
+                  <MenuItem value="followup_required">Follow-up Required</MenuItem>
+                  <MenuItem value="needstech">Needs Tech</MenuItem>
+                  <MenuItem value="goback_required">Go-back Required</MenuItem>
+                  <MenuItem value="pending_dispatch_review">Pending Dispatch Review</MenuItem>
+                  <MenuItem value="pending_approval">Pending Approval</MenuItem>
+                  <MenuItem value="ready_to_archive">Ready to Archive</MenuItem>
+                  <MenuItem value="nro_phase1_scheduled">NRO Phase 1 Scheduled</MenuItem>
+                  <MenuItem value="nro_phase1_complete_pending_phase2">NRO P1 Complete</MenuItem>
+                  <MenuItem value="nro_phase1_goback_required">NRO P1 Go-back</MenuItem>
+                  <MenuItem value="nro_phase2_scheduled">NRO Phase 2 Scheduled</MenuItem>
+                  <MenuItem value="nro_phase2_goback_required">NRO P2 Go-back</MenuItem>
+                  <MenuItem value="nro_ready_for_completion">NRO Ready For Completion</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={6} md={3}>
+              <FormControl fullWidth size="small">
                 <InputLabel sx={{ fontSize: '0.875rem' }}>Priority</InputLabel>
                 <Select value={values.priority} onChange={(e) => c('priority', e.target.value)} label="Priority" sx={{ fontSize: '0.875rem' }}>
                   <MenuItem value="normal">Normal</MenuItem>
@@ -338,6 +364,56 @@ function CompactTicketFormComplete({ onSubmit, initialValues, isEdit }) {
                 {!values.date_scheduled && <Alert severity="warning" sx={{ mt: 0.5, py: 0 }}><Typography variant="caption">Set scheduled date for onsite!</Typography></Alert>}
               </Grid>
             )}
+            {values.type === 'nro' && (
+              <>
+                <Grid item xs={12} md={3}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="NRO Phase 1 Date"
+                    type="date"
+                    value={values.nro_phase1_scheduled_date || ''}
+                    onChange={(e) => c('nro_phase1_scheduled_date', e.target.value)}
+                    InputLabelProps={{ shrink: true }}
+                    sx={{ '& input': { fontSize: '0.875rem' } }}
+                  />
+                </Grid>
+                <Grid item xs={12} md={3}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel sx={{ fontSize: '0.875rem' }}>NRO P1 State</InputLabel>
+                    <Select value={values.nro_phase1_state || ''} onChange={(e) => c('nro_phase1_state', e.target.value)} label="NRO P1 State" sx={{ fontSize: '0.875rem' }}>
+                      <MenuItem value="">Not Set</MenuItem>
+                      <MenuItem value="scheduled">Scheduled</MenuItem>
+                      <MenuItem value="completed">Completed</MenuItem>
+                      <MenuItem value="goback_required">Go-back Required</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid item xs={12} md={3}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="NRO Phase 2 Date"
+                    type="date"
+                    value={values.nro_phase2_scheduled_date || ''}
+                    onChange={(e) => c('nro_phase2_scheduled_date', e.target.value)}
+                    InputLabelProps={{ shrink: true }}
+                    sx={{ '& input': { fontSize: '0.875rem' } }}
+                  />
+                </Grid>
+                <Grid item xs={12} md={3}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel sx={{ fontSize: '0.875rem' }}>NRO P2 State</InputLabel>
+                    <Select value={values.nro_phase2_state || ''} onChange={(e) => c('nro_phase2_state', e.target.value)} label="NRO P2 State" sx={{ fontSize: '0.875rem' }}>
+                      <MenuItem value="">Not Set</MenuItem>
+                      <MenuItem value="scheduled">Scheduled</MenuItem>
+                      <MenuItem value="completed">Completed</MenuItem>
+                      <MenuItem value="goback_required">Go-back Required</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+              </>
+            )}
             
             <Grid item xs={12}>
               <TextField fullWidth size="small" label="Notes" multiline rows={3} value={values.notes}
@@ -356,7 +432,7 @@ function CompactTicketFormComplete({ onSubmit, initialValues, isEdit }) {
                 renderInput={(p) => <TextField {...p} label="Assigned Internal User" sx={{ '& input': { fontSize: '0.875rem' } }} />}
               />
             </Grid>
-            {values.type === 'onsite' && (
+            {(values.type === 'onsite' || values.type === 'nro') && (
               <Grid item xs={12} md={6}>
                 <Autocomplete size="small" options={fieldTechs} getOptionLabel={(o) => `${o.name} - ${o.region}`}
                   value={fieldTechs.find(ft => ft.field_tech_id === values.onsite_tech_id) || null}

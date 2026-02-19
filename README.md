@@ -13,6 +13,16 @@ The easiest way to manage the application is using the provided scripts:
 ./start_app.sh
 ```
 
+Start in development mode (backend reload + frontend HMR):
+```bash
+APP_MODE=dev ./start_app.sh
+```
+
+Start in production mode (backend workers + static frontend):
+```bash
+APP_MODE=prod ./start_app.sh
+```
+
 This script will:
 - ✅ Kill any existing processes on ports 8000 and 3000
 - ✅ Activate the Python virtual environment
@@ -38,6 +48,11 @@ This script will:
 ./restart_app.sh
 ```
 
+Restart in development mode:
+```bash
+./restart_app.sh dev
+```
+
 This script will:
 - ✅ Stop the current application
 - ✅ Wait for cleanup
@@ -54,7 +69,14 @@ source ../venv/bin/activate
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-#### Frontend
+#### Frontend (dev mode with HMR)
+```bash
+cd frontend
+npm install
+npm start
+```
+
+#### Frontend (prod static build)
 ```bash
 cd frontend
 npm install
@@ -200,6 +222,8 @@ npm start
 ## Features
 
 - ✅ **Ticket Management**: Create, edit, and track support tickets
+- ✅ **Workflow States**: Keep core status simple (`open`, `completed`, `archived`) while tracking operations with `workflow_state`
+- ✅ **NRO Two-Phase Flow**: Track/schedule phase 1 and phase 2 independently
 - ✅ **Inventory Management**: Track parts and equipment
 - ✅ **User Management**: Role-based access control
 - ✅ **Real-time Updates**: WebSocket integration
@@ -223,6 +247,7 @@ For issues or questions, check the logs:
 # Systemd service logs
 sudo journalctl -u ticketing-system -f
 
-# Application logs
-tail -f backend/logs/app.log
+# Startup script logs
+tail -f backend_uvicorn.log
+tail -f frontend_serve.log
 ``` 

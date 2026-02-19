@@ -18,6 +18,7 @@ import useReadableChip from './hooks/useReadableChip';
 import CompactShipmentForm from './CompactShipmentForm';
 import { canDelete } from './utils/permissions';
 import { sanitizeInput } from './utils/security';
+import { formatAuditFieldLabel, formatAuditValue } from './utils/auditFormatters';
 
 /** Renders notes with preserved formatting (newlines, indents) and styled email blocks */
 function NotesDisplay({ notes, codeBlockBg }) {
@@ -122,6 +123,14 @@ function CompactTicketDetail() {
   const [addShipmentOpen, setAddShipmentOpen] = useState(false);
   const [inventory, setInventory] = useState([]);
   const [tasks, setTasks] = useState([]);
+  const [workflowDialog, setWorkflowDialog] = useState({
+    open: false,
+    title: '',
+    targetState: '',
+    requireDate: false,
+    dateValue: '',
+    notes: ''
+  });
   const loadingRef = useRef(false);
 
   const load = async () => {
@@ -228,7 +237,62 @@ function CompactTicketDetail() {
     }
   };
 
-  const isAdmin = user?.role === 'admin';
+  const canDispatch = user?.role === 'admin' || user?.role === 'dispatcher';
+  const currentWorkflowState = ticket?.workflow_state || 'new';
+
+  const openWorkflowDialog = ({ title, targetState, requireDate = false, notes = '' }) => {
+    setWorkflowDialog({
+      open: true,
+      title,
+      targetState,
+      requireDate,
+      dateValue: ticket?.date_scheduled || '',
+      notes,
+    });
+  };
+
+  const closeWorkflowDialog = () => {
+    setWorkflowDialog({
+      open: false,
+      title: '',
+      targetState: '',
+      requireDate: false,
+      dateValue: '',
+      notes: ''
+    });
+  };
+
+  const submitWorkflowDialog = async () => {
+    try {
+      const payload = {
+        workflow_state: workflowDialog.targetState,
+        expected_ticket_version: ticket?.ticket_version || 1,
+      };
+      if (workflowDialog.requireDate) payload.schedule_date = workflowDialog.dateValue;
+      if (workflowDialog.notes?.trim()) payload.notes = workflowDialog.notes.trim();
+      await api.post(`/tickets/${ticketId}/workflow-transition`, payload);
+      success('Workflow updated');
+      closeWorkflowDialog();
+      await load();
+    } catch (err) {
+      const msg = err?.response?.data?.detail?.message || err?.response?.data?.detail || err?.message || 'Workflow action failed';
+      showError(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    }
+  };
+
+  const markReturnReceived = async () => {
+    try {
+      await api.post(`/tickets/${ticketId}/returns/received`, {
+        expected_ticket_version: ticket?.ticket_version || 1,
+        notes: 'Return marked received from ticket detail'
+      });
+      success('Return marked received');
+      await load();
+    } catch (err) {
+      const msg = err?.response?.data?.detail?.message || err?.response?.data?.detail || err?.message || 'Failed to mark return received';
+      showError(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    }
+  };
 
   if (!ticket) return <Box sx={{ p: 2 }}><Typography>Loading...</Typography></Box>;
 
@@ -258,6 +322,93 @@ function CompactTicketDetail() {
             )}
             {!['completed', 'closed', 'approved'].includes(ticket.status) && (
               <Button size="small" variant="contained" color="primary" onClick={() => handleQuickAction('complete')}>Complete</Button>
+            )}
+            {canDispatch && ticket.follow_up_required && !ticket.parts_received && (
+              <Button size="small" variant="contained" color="warning" onClick={markReturnReceived}>
+                Return Received
+              </Button>
+            )}
+            {canDispatch && ticket.type === 'nro' && (currentWorkflowState === 'new' || currentWorkflowState === 'pending_dispatch_review') && (
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => openWorkflowDialog({
+                  title: 'Schedule NRO Phase 1',
+                  targetState: 'nro_phase1_scheduled',
+                  requireDate: true,
+                  notes: 'Phase 1 scheduled from ticket detail'
+                })}
+              >
+                Schedule P1
+              </Button>
+            )}
+            {canDispatch && ticket.type === 'nro' && currentWorkflowState === 'nro_phase1_scheduled' && (
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => openWorkflowDialog({
+                  title: 'Mark NRO Phase 1 Complete',
+                  targetState: 'nro_phase1_complete_pending_phase2',
+                  notes: 'Phase 1 completed from ticket detail'
+                })}
+              >
+                P1 Complete
+              </Button>
+            )}
+            {canDispatch && ticket.type === 'nro' && currentWorkflowState === 'nro_phase1_complete_pending_phase2' && (
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => openWorkflowDialog({
+                  title: 'Schedule NRO Phase 2',
+                  targetState: 'nro_phase2_scheduled',
+                  requireDate: true,
+                  notes: 'Phase 2 scheduled from ticket detail'
+                })}
+              >
+                Schedule P2
+              </Button>
+            )}
+            {canDispatch && ticket.type === 'nro' && currentWorkflowState === 'nro_phase2_scheduled' && (
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => openWorkflowDialog({
+                  title: 'Mark NRO Phase 2 Complete',
+                  targetState: 'nro_ready_for_completion',
+                  notes: 'Phase 2 completed from ticket detail'
+                })}
+              >
+                P2 Complete
+              </Button>
+            )}
+            {canDispatch && ticket.type === 'nro' && currentWorkflowState === 'nro_phase1_goback_required' && (
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => openWorkflowDialog({
+                  title: 'Reschedule NRO Phase 1',
+                  targetState: 'nro_phase1_scheduled',
+                  requireDate: true,
+                  notes: 'Phase 1 go-back rescheduled'
+                })}
+              >
+                Reschedule P1
+              </Button>
+            )}
+            {canDispatch && ticket.type === 'nro' && currentWorkflowState === 'nro_phase2_goback_required' && (
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => openWorkflowDialog({
+                  title: 'Reschedule NRO Phase 2',
+                  targetState: 'nro_phase2_scheduled',
+                  requireDate: true,
+                  notes: 'Phase 2 go-back rescheduled'
+                })}
+              >
+                Reschedule P2
+              </Button>
             )}
             <Button size="small" variant="contained" startIcon={<Edit />} onClick={() => navigate(`/tickets/${ticketId}/edit`)}>Edit</Button>
             {canDelete(user) && (
@@ -472,18 +623,18 @@ function CompactTicketDetail() {
                   <Paper key={a.audit_id} sx={{ p: 1, bgcolor: codeBlockBg }}>
                     <Stack direction="row" justifyContent="space-between">
                       <Typography variant="caption" sx={{ fontWeight: 700 }}>
-                        {a.field_changed}
+                        {formatAuditFieldLabel(a.field_changed)}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
                         {a.change_time ? new Date(a.change_time).toLocaleString() : 'N/A'}
                       </Typography>
                     </Stack>
                     <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>
-                      User: {a.user_id || 'system'}
+                      Actor: {a.user?.name || a.user_id || 'system'}{a.user?.role ? ` (${String(a.user.role).toUpperCase()})` : ''}
                     </Typography>
                     {(a.old_value || a.new_value) && (
                       <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>
-                        {a.old_value ? `From: ${a.old_value}` : ''}{a.old_value && a.new_value ? ' -> ' : ''}{a.new_value ? `To: ${a.new_value}` : ''}
+                        {a.old_value ? `From: ${formatAuditValue(a.old_value)}` : ''}{a.old_value && a.new_value ? ' -> ' : ''}{a.new_value ? `To: ${formatAuditValue(a.new_value)}` : ''}
                       </Typography>
                     )}
                   </Paper>
@@ -528,6 +679,42 @@ function CompactTicketDetail() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setAddShipmentOpen(false)}>Cancel</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={workflowDialog.open} onClose={closeWorkflowDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>{workflowDialog.title || 'Workflow Action'}</DialogTitle>
+        <DialogContent>
+          {workflowDialog.requireDate && (
+            <TextField
+              margin="dense"
+              label="Scheduled Date"
+              type="date"
+              fullWidth
+              value={workflowDialog.dateValue}
+              onChange={(e) => setWorkflowDialog((s) => ({ ...s, dateValue: e.target.value }))}
+              InputLabelProps={{ shrink: true }}
+            />
+          )}
+          <TextField
+            margin="dense"
+            label="Notes"
+            fullWidth
+            multiline
+            minRows={2}
+            value={workflowDialog.notes}
+            onChange={(e) => setWorkflowDialog((s) => ({ ...s, notes: e.target.value }))}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeWorkflowDialog}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={submitWorkflowDialog}
+            disabled={workflowDialog.requireDate && !workflowDialog.dateValue}
+          >
+            Apply
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>

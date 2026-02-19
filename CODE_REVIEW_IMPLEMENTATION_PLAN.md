@@ -18,16 +18,16 @@
 - [x] Fix ticket create parity: persist `tech_rating`
 
 ### Phase B - Contract and transition enforcement (next)
-- [ ] Finalize canonical primary status set (`open`, `completed`, `archived`) and transition table by role
-- [ ] Introduce dedicated workflow transition endpoint(s) with role guards + precondition checks
+- [x] Finalize canonical primary status set (`open`, `completed`, `archived`) and transition table by role
+- [x] Introduce dedicated workflow transition endpoint(s) with role guards + precondition checks
 - [x] Add dispatcher queues (`needstech`, `goback_required`, `pending_approval`, returns follow-up)
 - [x] Add NRO 2-phase scheduling fields and transitions
 
 ### Phase C - Data quality and collision hardening (next)
-- [ ] Strict payload validation (`extra=forbid` on critical write schemas)
-- [ ] Input normalization/cleansing rules (INC/SO/category/notes boundaries)
-- [ ] Add mismatch/error messaging on stale ticket writes in frontend
-- [ ] Add tests for concurrent update conflict handling
+- [x] Strict payload validation (`extra=forbid` on critical write schemas)
+- [x] Input normalization/cleansing rules (INC/SO/category/notes boundaries)
+- [x] Add mismatch/error messaging on stale ticket writes in frontend
+- [x] Add tests for concurrent update conflict handling
 
 ### Phase D - Reporting + OpenAPI parity (next)
 - [x] Update reports to include workflow states, aging queues, NRO phase metrics, and return tracking

@@ -457,6 +457,8 @@ class TicketAuditCreate(TicketAuditBase):
 
 class TicketAuditOut(TicketAuditBase):
     audit_id: str
+    user: Optional['UserOut'] = None
+    model_config = ConfigDict(from_attributes=True)
 
 class ShipmentBase(BaseModel):
     site_id: str
@@ -698,6 +700,30 @@ class WorkflowTransitionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     @field_validator("notes", "follow_up_notes", mode="before")
+    @classmethod
+    def clean_notes(cls, v):
+        if v is None or not isinstance(v, str):
+            return v
+        return re.sub(r"[^\x20-\x7E\t\r\n]", "", v).strip()
+
+    @field_validator("expected_ticket_version", mode="before")
+    @classmethod
+    def validate_expected_version(cls, v):
+        if v is None:
+            return v
+        iv = int(v)
+        if iv < 1:
+            raise ValueError("expected_ticket_version must be >= 1")
+        return iv
+
+
+class ReturnReceiptRequest(BaseModel):
+    expected_ticket_version: Optional[int] = None
+    notes: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("notes", mode="before")
     @classmethod
     def clean_notes(cls, v):
         if v is None or not isinstance(v, str):

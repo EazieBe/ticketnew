@@ -286,6 +286,56 @@ def workflow_transition(
 
     return _normalize_ticket_dt(ticket)
 
+
+@router.post(
+    "/{ticket_id}/returns/received",
+    response_model=schemas.TicketOut,
+    tags=["ticket-workflow"],
+    responses={
+        403: {"description": "Dispatcher/Admin role required"},
+        404: {"description": "Ticket not found"},
+        409: {"description": "Optimistic lock conflict"},
+    },
+)
+def mark_return_received(
+    ticket_id: str,
+    payload: schemas.ReturnReceiptRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role([models.UserRole.admin.value, models.UserRole.dispatcher.value])),
+    background_tasks: BackgroundTasks = None,
+):
+    """Mark expected return as received and remove from outstanding returns queue."""
+    ticket = crud.get_ticket(db, ticket_id=ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    _enforce_ticket_version(payload.expected_ticket_version, ticket.ticket_version or 1)
+    previous_parts_received = bool(ticket.parts_received)
+
+    ticket.parts_received = True
+    ticket.follow_up_required = False
+    if ticket.workflow_state == models.TicketWorkflowState.followup_required.value:
+        ticket.workflow_state = models.TicketWorkflowState.pending_dispatch_review.value
+    ticket.last_updated_by = current_user.user_id
+    ticket.last_updated_at = datetime.now(timezone.utc)
+
+    if payload.notes:
+        base = ticket.notes or ""
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        note_line = f"[RETURN_RECEIVED] {stamp} - {payload.notes}"
+        ticket.notes = f"{base}\n{note_line}".strip()
+
+    _bump_ticket_version(ticket)
+    db.commit()
+    db.refresh(ticket)
+    audit_log(db, current_user.user_id, "return_received", str(previous_parts_received), "true", ticket_id)
+
+    if background_tasks:
+        _enqueue_broadcast(background_tasks, '{"type":"ticket","action":"return_received"}')
+
+    return _normalize_ticket_dt(ticket)
+
+
 @router.get(
     "/dispatch/queue",
     response_model=List[schemas.TicketOut],
