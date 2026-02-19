@@ -97,6 +97,68 @@ npx serve -s build -l 3000 --single
 
 Ensure `CORS_ORIGINS` in `.env` includes your frontend origin (e.g. `http://192.168.43.50:3000`). The frontend uses the same host as the page, so API and WebSocket URLs follow the address you use in the browser.
 
+## Architecture Diagram
+
+```mermaid
+flowchart TB
+  subgraph Clients["Client Layer"]
+    U1["Dispatcher/Admin Browser"]
+    U2["Technician Browser"]
+  end
+
+  subgraph Frontend["React Frontend (Port 3000)"]
+    APP["App Router + Auth Context"]
+    MOD["Compact Modules
+Tickets / Sites / Shipments / Tasks / Reports / Dispatch Queue"]
+    WSCLI["WebSocket Client
+/ws/updates"]
+  end
+
+  subgraph Backend["FastAPI Backend (Port 8000)"]
+    MAIN["main.py + middleware
+CORS / GZip / auth"]
+    RT["Routers
+tickets, shipments, tasks, users, sites, sla, audit"]
+    CRUD["crud.py service layer"]
+    SCH["schemas.py (Pydantic contracts)"]
+    ORM["models.py (SQLAlchemy ORM)"]
+    BCAST["Realtime broadcast queue"]
+  end
+
+  subgraph Data["Data and Infra"]
+    PG["PostgreSQL
+tickets, audits, shipments, inventory, users"]
+    AL["Alembic migrations"]
+    RD["Redis (optional realtime/cache/rate-limit paths)"]
+  end
+
+  U1 -->|HTTPS| APP
+  U2 -->|HTTPS| APP
+  APP --> MOD
+  MOD -->|REST JSON| MAIN
+  APP -->|JWT auth| MAIN
+  APP -->|WS token| WSCLI
+  WSCLI --> BCAST
+
+  MAIN --> RT
+  RT --> SCH
+  RT --> CRUD
+  CRUD --> ORM
+  ORM --> PG
+  AL --> PG
+  MAIN --> RD
+  BCAST --> RD
+  BCAST --> WSCLI
+```
+
+### Workflow Architecture Notes
+
+- Core ticket lifecycle uses simple `status`: `open`, `completed`, `archived`.
+- Operational state uses `workflow_state` for queues and day-to-day handling (`scheduled`, `onsite`, `offsite`, `needstech`, `goback_required`, NRO phase states, etc.).
+- Dispatcher/admin tools consume workflow queues from backend endpoints and drive state transitions through dedicated workflow APIs.
+- Ticket updates use optimistic concurrency (`ticket_version` + `expected_ticket_version`) to prevent user collisions.
+- Audit timeline captures key workflow and return actions for accountability and reporting.
+
 ## Build Output and Locations
 
 ### Frontend (React)
