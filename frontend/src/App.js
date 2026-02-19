@@ -1383,6 +1383,8 @@ const adminItems = [
   }
 ];
 
+const canUseDispatchTools = (user) => user?.role === 'admin' || user?.role === 'dispatcher';
+
 function AppLayout() {
   const { user, logout, loading } = useAuth();
   const { notifications, unreadCount, markAsRead, markAllAsRead, clearAll, clearNotification } = useNotifications();
@@ -1573,7 +1575,7 @@ function AppLayout() {
         <Divider sx={{ my: 2 }} />
 
         {/* Admin Navigation */}
-        {(user?.role === 'admin' || user?.role === 'dispatcher') && (
+        {canUseDispatchTools(user) && (
           <List>
             <ListItem disablePadding>
               <ListItemButton
@@ -1583,7 +1585,7 @@ function AppLayout() {
                 <ListItemIcon>
                   <AdminPanelSettings />
                 </ListItemIcon>
-                <ListItemText primary="Admin" />
+                <ListItemText primary="Admin / Dispatch" />
                 {expandedItems.has('admin') ? <ExpandLess /> : <ExpandMore />}
               </ListItemButton>
             </ListItem>
@@ -1887,8 +1889,8 @@ function AppLayout() {
             <Route path="/audit" element={<Audit />} />
             <Route path="/map" element={<FieldTechMap />} />
             <Route path="/sla" element={<SLAManagement />} />
-            <Route path="/reports" element={<Reports />} />
-            <Route path="/dispatch-queue" element={<DispatchQueue />} />
+            <Route path="/reports" element={canUseDispatchTools(user) ? <Reports /> : <Navigate to="/" replace />} />
+            <Route path="/dispatch-queue" element={canUseDispatchTools(user) ? <DispatchQueue /> : <Navigate to="/" replace />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/change-password" element={<ChangePassword userId={location.state?.userId || (user && user.user_id)} />} />

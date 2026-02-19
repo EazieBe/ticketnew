@@ -14,6 +14,10 @@ import {
   TableRow,
   Chip,
   Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
   IconButton,
   Tooltip,
   TextField,
@@ -41,6 +45,18 @@ function DispatchQueue() {
   const [search, setSearch] = useState('');
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [actionDialog, setActionDialog] = useState({
+    open: false,
+    ticket: null,
+    title: '',
+    workflow_state: '',
+    requireDate: false,
+    convert_to_type: null,
+    defaultNotes: '',
+    approve: false
+  });
+  const [actionDate, setActionDate] = useState('');
+  const [actionNotes, setActionNotes] = useState('');
 
   const load = async () => {
     try {
@@ -72,17 +88,6 @@ function DispatchQueue() {
     );
   }, [items, search]);
 
-  const promptDate = (label = 'Enter date (YYYY-MM-DD)') => {
-    const v = window.prompt(label, '');
-    if (!v) return null;
-    const s = String(v).trim();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-      showError('Invalid date format. Use YYYY-MM-DD.');
-      return null;
-    }
-    return s;
-  };
-
   const transition = async (ticket, payload) => {
     try {
       await api.post(`/tickets/${ticket.ticket_id}/workflow-transition`, {
@@ -108,25 +113,84 @@ function DispatchQueue() {
     }
   };
 
+  const openTransitionDialog = (ticket, cfg) => {
+    setActionDialog({
+      open: true,
+      ticket,
+      title: cfg.title,
+      workflow_state: cfg.workflow_state || '',
+      requireDate: Boolean(cfg.requireDate),
+      convert_to_type: cfg.convert_to_type || null,
+      defaultNotes: cfg.defaultNotes || '',
+      approve: Boolean(cfg.approve)
+    });
+    setActionDate(ticket?.date_scheduled || '');
+    setActionNotes(cfg.defaultNotes || '');
+  };
+
+  const closeActionDialog = () => {
+    setActionDialog({
+      open: false,
+      ticket: null,
+      title: '',
+      workflow_state: '',
+      requireDate: false,
+      convert_to_type: null,
+      defaultNotes: '',
+      approve: false
+    });
+    setActionDate('');
+    setActionNotes('');
+  };
+
+  const submitActionDialog = async () => {
+    const ticket = actionDialog.ticket;
+    if (!ticket) return;
+    if (actionDialog.approve) {
+      await approveArchive(ticket);
+      closeActionDialog();
+      return;
+    }
+    if (actionDialog.requireDate && !actionDate) {
+      showError('Please select a date before applying this action.');
+      return;
+    }
+    const payload = {
+      workflow_state: actionDialog.workflow_state
+    };
+    if (actionDialog.convert_to_type) payload.convert_to_type = actionDialog.convert_to_type;
+    if (actionDialog.requireDate) payload.schedule_date = actionDate;
+    if (actionNotes && actionNotes.trim()) payload.notes = actionNotes.trim();
+    await transition(ticket, payload);
+    closeActionDialog();
+  };
+
   const runQueueAction = async (ticket) => {
     const ws = ticket.workflow_state;
-    if (ws === 'pending_approval') return approveArchive(ticket);
+    if (ws === 'pending_approval') {
+      return openTransitionDialog(ticket, {
+        title: `Approve ticket ${ticket.ticket_id}?`,
+        approve: true
+      });
+    }
 
     if (ws === 'needstech') {
-      const date = promptDate('Schedule onsite date (YYYY-MM-DD)');
-      if (!date) return;
-      return transition(ticket, {
+      return openTransitionDialog(ticket, {
+        title: `Convert and schedule ${ticket.ticket_id}`,
         workflow_state: 'scheduled',
         convert_to_type: 'onsite',
-        schedule_date: date,
-        notes: 'Converted from inhouse needstech to onsite scheduled'
+        requireDate: true,
+        defaultNotes: 'Converted from inhouse needstech to onsite scheduled'
       });
     }
 
     if (ws === 'goback_required') {
-      const date = promptDate('Set go-back date (YYYY-MM-DD)');
-      if (!date) return;
-      return transition(ticket, { workflow_state: 'scheduled', schedule_date: date, notes: 'Go-back date scheduled' });
+      return openTransitionDialog(ticket, {
+        title: `Set go-back date for ${ticket.ticket_id}`,
+        workflow_state: 'scheduled',
+        requireDate: true,
+        defaultNotes: 'Go-back date scheduled'
+      });
     }
 
     if (ws === 'followup_required') {
@@ -138,19 +202,28 @@ function DispatchQueue() {
       return transition(ticket, { workflow_state: 'nro_phase1_complete_pending_phase2', notes: 'Phase 1 marked complete' });
     }
     if (ws === 'nro_phase1_complete_pending_phase2') {
-      const date = promptDate('Schedule NRO phase 2 date (YYYY-MM-DD)');
-      if (!date) return;
-      return transition(ticket, { workflow_state: 'nro_phase2_scheduled', schedule_date: date, notes: 'Phase 2 scheduled' });
+      return openTransitionDialog(ticket, {
+        title: `Schedule NRO phase 2 for ${ticket.ticket_id}`,
+        workflow_state: 'nro_phase2_scheduled',
+        requireDate: true,
+        defaultNotes: 'Phase 2 scheduled'
+      });
     }
     if (ws === 'nro_phase1_goback_required') {
-      const date = promptDate('Schedule NRO phase 1 go-back date (YYYY-MM-DD)');
-      if (!date) return;
-      return transition(ticket, { workflow_state: 'nro_phase1_scheduled', schedule_date: date, notes: 'Phase 1 go-back scheduled' });
+      return openTransitionDialog(ticket, {
+        title: `Reschedule NRO phase 1 for ${ticket.ticket_id}`,
+        workflow_state: 'nro_phase1_scheduled',
+        requireDate: true,
+        defaultNotes: 'Phase 1 go-back scheduled'
+      });
     }
     if (ws === 'nro_phase2_goback_required') {
-      const date = promptDate('Schedule NRO phase 2 go-back date (YYYY-MM-DD)');
-      if (!date) return;
-      return transition(ticket, { workflow_state: 'nro_phase2_scheduled', schedule_date: date, notes: 'Phase 2 go-back scheduled' });
+      return openTransitionDialog(ticket, {
+        title: `Reschedule NRO phase 2 for ${ticket.ticket_id}`,
+        workflow_state: 'nro_phase2_scheduled',
+        requireDate: true,
+        defaultNotes: 'Phase 2 go-back scheduled'
+      });
     }
     if (ws === 'nro_phase2_scheduled') {
       return transition(ticket, { workflow_state: 'nro_ready_for_completion', notes: 'Phase 2 marked complete; ready for completion' });
@@ -178,7 +251,7 @@ function DispatchQueue() {
           <Stack>
             <Typography variant="h6" sx={{ fontSize: '1rem', fontWeight: 700 }}>Dispatcher Queue</Typography>
             <Typography variant="caption" color="text.secondary">
-              Review tickets requiring scheduling, approval, go-backs, and follow-ups
+              Admin/dispatcher review for scheduling, approval, go-backs, and follow-ups
             </Typography>
           </Stack>
           <Tooltip title="Refresh">
@@ -273,6 +346,39 @@ function DispatchQueue() {
           </TableBody>
         </Table>
       </Paper>
+      <Dialog open={actionDialog.open} onClose={closeActionDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>{actionDialog.title || 'Apply queue action'}</DialogTitle>
+        <DialogContent>
+          {actionDialog.requireDate && (
+            <TextField
+              margin="dense"
+              label="Scheduled Date"
+              type="date"
+              fullWidth
+              value={actionDate}
+              onChange={(e) => setActionDate(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+            />
+          )}
+          {!actionDialog.approve && (
+            <TextField
+              margin="dense"
+              label="Notes (optional)"
+              fullWidth
+              multiline
+              minRows={2}
+              value={actionNotes}
+              onChange={(e) => setActionNotes(e.target.value)}
+            />
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeActionDialog}>Cancel</Button>
+          <Button onClick={submitActionDialog} variant="contained">
+            Apply
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

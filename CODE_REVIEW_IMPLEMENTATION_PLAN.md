@@ -30,9 +30,9 @@
 - [ ] Add tests for concurrent update conflict handling
 
 ### Phase D - Reporting + OpenAPI parity (next)
-- [ ] Update reports to include workflow states, aging queues, NRO phase metrics, and return tracking
-- [ ] Update API docs/tags/examples for workflow endpoints and conflict responses
-- [ ] Add migration + schema parity checks in CI path
+- [x] Update reports to include workflow states, aging queues, NRO phase metrics, and return tracking
+- [x] Update API docs/tags/examples for workflow endpoints and conflict responses
+- [x] Add migration + schema parity checks in CI path
 
 ---
 

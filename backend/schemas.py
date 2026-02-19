@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
 import re
-from typing import Optional, List
+from typing import Optional, List, Dict
 from datetime import date, datetime
 import enum
 
@@ -713,6 +713,37 @@ class WorkflowTransitionRequest(BaseModel):
         if iv < 1:
             raise ValueError("expected_ticket_version must be >= 1")
         return iv
+
+
+class QueueAgingMetric(BaseModel):
+    queue: str
+    count: int
+    avg_age_hours: float
+    max_age_hours: float
+
+
+class TimeSpentByUserMetric(BaseModel):
+    user_id: str
+    user_name: str
+    minutes: int
+
+
+class WorkflowSummaryReport(BaseModel):
+    generated_at: datetime
+    lookback_days: int
+    status_counts: Dict[str, int]
+    workflow_state_counts: Dict[str, int]
+    queue_aging: List[QueueAgingMetric]
+    onsite_too_long_count: int
+    onsite_too_long_ticket_ids: List[str]
+    returns_outstanding_count: int
+    returns_outstanding_ticket_ids: List[str]
+    nro_phase1_pending_count: int
+    nro_phase2_pending_count: int
+    nro_ready_for_completion_count: int
+    top_categories: Dict[str, int]
+    time_spent_by_user: List[TimeSpentByUserMetric]
+    field_tech_avg_onsite_minutes: float
 
 class TicketClaim(BaseModel):
     claimed_by: str

@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Body, Response
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Body, Response, Query
 from sqlalchemy.orm import Session
-from typing import List, Optional
-from datetime import datetime, timezone
+from typing import List, Optional, Dict
+from datetime import datetime, timezone, timedelta
 
 import models, schemas, crud
 from database import get_db
@@ -186,7 +186,17 @@ def list_tickets(
     )
     return [_normalize_ticket_dt(t) for t in tickets]
 
-@router.post("/{ticket_id}/workflow-transition", response_model=schemas.TicketOut, tags=["ticket-workflow"])
+@router.post(
+    "/{ticket_id}/workflow-transition",
+    response_model=schemas.TicketOut,
+    tags=["ticket-workflow"],
+    responses={
+        400: {"description": "Invalid transition payload or precondition failure"},
+        403: {"description": "Not authorized for this transition"},
+        404: {"description": "Ticket not found"},
+        409: {"description": "Optimistic lock conflict"},
+    },
+)
 def workflow_transition(
     ticket_id: str,
     transition: schemas.WorkflowTransitionRequest,
@@ -276,7 +286,15 @@ def workflow_transition(
 
     return _normalize_ticket_dt(ticket)
 
-@router.get("/dispatch/queue", response_model=List[schemas.TicketOut], tags=["ticket-workflow"])
+@router.get(
+    "/dispatch/queue",
+    response_model=List[schemas.TicketOut],
+    tags=["ticket-workflow"],
+    responses={
+        400: {"description": "Invalid queue type"},
+        403: {"description": "Dispatcher/Admin role required"},
+    },
+)
 def dispatcher_queue(
     queue: str = "all",
     skip: int = 0,
@@ -323,6 +341,160 @@ def dispatcher_queue(
     query = db.query(models.Ticket).filter(models.Ticket.workflow_state.in_(selected_states)).order_by(models.Ticket.date_scheduled.asc().nullsfirst(), models.Ticket.created_at.desc())
     items = query.offset(safe_skip).limit(safe_limit).all()
     return [_normalize_ticket_dt(t) for t in items]
+
+
+@router.get("/{ticket_id}/audits", response_model=List[schemas.TicketAuditOut], tags=["ticket-workflow"])
+def ticket_audits(
+    ticket_id: str,
+    limit: int = 200,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Get audit timeline entries for a single ticket."""
+    ticket = crud.get_ticket(db, ticket_id=ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    safe_limit = max(1, min(limit, 1000))
+    audits = crud.get_ticket_audits(db, ticket_id=ticket_id)
+    return audits[:safe_limit]
+
+
+@router.get(
+    "/reports/workflow-summary",
+    response_model=schemas.WorkflowSummaryReport,
+    tags=["reports", "ticket-workflow"],
+    responses={403: {"description": "Dispatcher/Admin role required"}},
+)
+def workflow_summary_report(
+    lookback_days: int = Query(30, ge=1, le=3650),
+    onsite_alert_minutes: int = Query(180, ge=1, le=1440),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role([models.UserRole.admin.value, models.UserRole.dispatcher.value])),
+):
+    """Operational workflow report for queue aging, NRO phases, and time tracking."""
+    now = datetime.now(timezone.utc)
+    lookback_start = now - timedelta(days=lookback_days)
+    tickets = db.query(models.Ticket).all()
+
+    status_counts: Dict[str, int] = {}
+    workflow_state_counts: Dict[str, int] = {}
+    queue_ages: Dict[str, List[float]] = {
+        "approval": [],
+        "needstech": [],
+        "goback": [],
+        "returns": [],
+    }
+    queue_state_map = {
+        "approval": {models.TicketWorkflowState.pending_approval.value, models.TicketWorkflowState.nro_ready_for_completion.value},
+        "needstech": {models.TicketWorkflowState.needstech.value, models.TicketWorkflowState.nro_phase1_complete_pending_phase2.value},
+        "goback": {
+            models.TicketWorkflowState.goback_required.value,
+            models.TicketWorkflowState.nro_phase1_goback_required.value,
+            models.TicketWorkflowState.nro_phase2_goback_required.value,
+        },
+        "returns": {models.TicketWorkflowState.followup_required.value},
+    }
+    onsite_too_long_ticket_ids: List[str] = []
+    returns_outstanding_count = 0
+    returns_outstanding_ticket_ids: List[str] = []
+    nro_phase1_pending_count = 0
+    nro_phase2_pending_count = 0
+    nro_ready_for_completion_count = 0
+    category_counts: Dict[str, int] = {}
+
+    for t in tickets:
+        status_val = getattr(t.status, "value", t.status) or "open"
+        ws = t.workflow_state or models.TicketWorkflowState.new.value
+        status_counts[status_val] = status_counts.get(status_val, 0) + 1
+        workflow_state_counts[ws] = workflow_state_counts.get(ws, 0) + 1
+
+        created = getattr(t, "created_at", None)
+        if created and getattr(created, "tzinfo", None) is None:
+            created = created.replace(tzinfo=timezone.utc)
+        if created:
+            age_hours = max(0.0, (now - created).total_seconds() / 3600.0)
+            for queue_name, state_set in queue_state_map.items():
+                if ws in state_set:
+                    queue_ages[queue_name].append(age_hours)
+
+        if ws == models.TicketWorkflowState.onsite.value and t.check_in_time:
+            check_in = t.check_in_time
+            if getattr(check_in, "tzinfo", None) is None:
+                check_in = check_in.replace(tzinfo=timezone.utc)
+            onsite_minutes = max(0.0, (now - check_in).total_seconds() / 60.0)
+            if onsite_minutes >= onsite_alert_minutes:
+                onsite_too_long_ticket_ids.append(t.ticket_id)
+
+        if bool(t.follow_up_required) and not bool(t.parts_received):
+            returns_outstanding_count += 1
+            returns_outstanding_ticket_ids.append(t.ticket_id)
+
+        t_type = getattr(t.type, "value", t.type)
+        if t_type == models.TicketType.nro.value:
+            if ws == models.TicketWorkflowState.nro_ready_for_completion.value:
+                nro_ready_for_completion_count += 1
+            if (t.nro_phase1_state or "") != "completed":
+                nro_phase1_pending_count += 1
+            if (t.nro_phase1_state or "") == "completed" and (t.nro_phase2_state or "") != "completed":
+                nro_phase2_pending_count += 1
+
+        if t.category:
+            normalized = t.category.strip().lower()
+            if normalized:
+                category_counts[normalized] = category_counts.get(normalized, 0) + 1
+
+    queue_aging_metrics: List[schemas.QueueAgingMetric] = []
+    for queue_name, ages in queue_ages.items():
+        if ages:
+            avg_age = round(sum(ages) / len(ages), 2)
+            max_age = round(max(ages), 2)
+        else:
+            avg_age = 0.0
+            max_age = 0.0
+        queue_aging_metrics.append(
+            schemas.QueueAgingMetric(
+                queue=queue_name,
+                count=len(ages),
+                avg_age_hours=avg_age,
+                max_age_hours=max_age,
+            )
+        )
+
+    time_entries = db.query(models.TimeEntry).filter(models.TimeEntry.start_time >= lookback_start).all()
+    user_minutes: Dict[str, int] = {}
+    user_names: Dict[str, str] = {}
+    for e in time_entries:
+        uid = e.user_id or "unknown"
+        minutes = int(e.duration_minutes or 0)
+        user_minutes[uid] = user_minutes.get(uid, 0) + minutes
+        user_names[uid] = (e.user.name if getattr(e, "user", None) and e.user.name else uid)
+
+    time_spent_by_user = [
+        schemas.TimeSpentByUserMetric(user_id=uid, user_name=user_names.get(uid, uid), minutes=mins)
+        for uid, mins in sorted(user_minutes.items(), key=lambda x: x[1], reverse=True)
+    ]
+
+    onsite_values = [int(t.onsite_duration_minutes) for t in tickets if t.onsite_duration_minutes is not None]
+    field_tech_avg = round(sum(onsite_values) / len(onsite_values), 2) if onsite_values else 0.0
+    top_categories = dict(sorted(category_counts.items(), key=lambda x: x[1], reverse=True)[:10])
+
+    return schemas.WorkflowSummaryReport(
+        generated_at=now,
+        lookback_days=lookback_days,
+        status_counts=status_counts,
+        workflow_state_counts=workflow_state_counts,
+        queue_aging=queue_aging_metrics,
+        onsite_too_long_count=len(onsite_too_long_ticket_ids),
+        onsite_too_long_ticket_ids=onsite_too_long_ticket_ids,
+        returns_outstanding_count=returns_outstanding_count,
+        returns_outstanding_ticket_ids=returns_outstanding_ticket_ids,
+        nro_phase1_pending_count=nro_phase1_pending_count,
+        nro_phase2_pending_count=nro_phase2_pending_count,
+        nro_ready_for_completion_count=nro_ready_for_completion_count,
+        top_categories=top_categories,
+        time_spent_by_user=time_spent_by_user,
+        field_tech_avg_onsite_minutes=field_tech_avg,
+    )
 
 @router.get("/{ticket_id}", response_model=schemas.TicketOut)
 def get_ticket(

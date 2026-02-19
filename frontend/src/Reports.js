@@ -10,7 +10,7 @@ import {
 import {
   TrendingUp, TrendingDown, Assessment, LocalShipping, Inventory, Timeline,
   Analytics, ExpandMore, Download, Visibility, FilterList, Refresh, CalendarToday,
-  Assignment, Store, Group, Build
+  Assignment, Store, Group, Build, Warning
 } from '@mui/icons-material';
 import {
   PieChart, Pie, Cell, Tooltip as RechartsTooltip, AreaChart, CartesianGrid, XAxis, YAxis, Area, BarChart, Bar, ResponsiveContainer
@@ -40,6 +40,7 @@ function Reports() {
   const [fieldTechs, setFieldTechs] = useState([]);
   const [shipments, setShipments] = useState([]);
   const [inventory, setInventory] = useState([]);
+  const [workflowSummary, setWorkflowSummary] = useState(null);
   const [filters, setFilters] = useState({
     dateFrom: dayjs().startOf('month').format('YYYY-MM-DD'),
     dateTo: dayjs().format('YYYY-MM-DD'),
@@ -54,13 +55,14 @@ function Reports() {
     try {
       setLoading(true);
       setError(null);
-      const [ticketsRes, sitesRes, usersRes, fieldTechsRes, shipmentsRes, inventoryRes] = await Promise.all([
+      const [ticketsRes, sitesRes, usersRes, fieldTechsRes, shipmentsRes, inventoryRes, workflowSummaryRes] = await Promise.all([
         api.get('/tickets/'),
         api.get('/sites/'),
         api.get('/users/'),
         api.get('/fieldtechs/'),
         api.get('/shipments/'),
-        api.get('/inventory/')
+        api.get('/inventory/'),
+        api.get('/tickets/reports/workflow-summary?lookback_days=30&onsite_alert_minutes=180')
       ]);
       
       setTickets(ticketsRes || []);
@@ -69,6 +71,7 @@ function Reports() {
       setFieldTechs(fieldTechsRes || []);
       setShipments(shipmentsRes || []);
       setInventory(inventoryRes || []);
+      setWorkflowSummary(workflowSummaryRes || null);
     } catch (err) {
       console.error('Error fetching data:', err);
       setError('Failed to load report data');
@@ -92,10 +95,10 @@ function Reports() {
   // Calculate summary metrics
   const totalTickets = tickets.length;
   const openTickets = tickets.filter(t => t.status === 'open').length;
-  const closedTickets = tickets.filter(t => t.status === 'closed').length;
-  const inProgressTickets = tickets.filter(t => t.status === 'in_progress').length;
+  const completedTickets = tickets.filter(t => ['completed', 'closed', 'approved'].includes(t.status)).length;
+  const inProgressTickets = tickets.filter(t => ['claimed', 'onsite', 'offsite', 'scheduled'].includes(t.workflow_state)).length;
   const overdueTickets = tickets.filter(t => {
-    if (t.status === 'closed') return false;
+    if (['completed', 'closed', 'approved', 'archived'].includes(t.status)) return false;
     const timestamp = getBestTimestamp(t, 'tickets');
     if (!timestamp) return false;
     const created = dayjs(timestamp);
@@ -112,15 +115,15 @@ function Reports() {
   const statusData = [
     { name: 'Open', value: openTickets, color: '#1976d2' },
     { name: 'In Progress', value: inProgressTickets, color: '#FFBB28' },
-    { name: 'Closed', value: closedTickets, color: '#4caf50' },
+    { name: 'Completed', value: completedTickets, color: '#4caf50' },
     { name: 'Overdue', value: overdueTickets, color: '#f44336' }
   ].filter(item => item.value > 0);
 
   const ticketTypeData = [
     { name: 'Inhouse', value: tickets.filter(t => t.type === 'inhouse').length },
     { name: 'Onsite', value: tickets.filter(t => t.type === 'onsite').length },
-            { name: 'Projects', value: tickets.filter(t => t.type === 'projects').length },
-    { name: 'Shipping', value: tickets.filter(t => t.type === 'shipping').length },
+    { name: 'NRO', value: tickets.filter(t => t.type === 'nro').length },
+    { name: 'Projects', value: tickets.filter(t => t.type === 'projects').length },
     { name: 'Misc', value: tickets.filter(t => t.type === 'misc').length }
   ].filter(item => item.value > 0);
 
@@ -135,7 +138,7 @@ function Reports() {
     return {
       month: month.format('MMM'),
       tickets: monthTickets.length,
-      closed: monthTickets.filter(t => t.status === 'closed').length
+      completed: monthTickets.filter(t => ['completed', 'closed', 'approved'].includes(t.status)).length
     };
   });
 
@@ -346,7 +349,88 @@ function Reports() {
             </CardContent>
           </Card>
         </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ borderLeft: '4px solid #ff9800' }}>
+            <CardContent>
+              <Box display="flex" alignItems="center">
+                <Timeline sx={{ mr: 1, color: '#ff9800' }} />
+                <Typography variant="h6">Queue Backlog</Typography>
+              </Box>
+              <Typography variant="h4">
+                {(workflowSummary?.queue_aging || []).reduce((sum, q) => sum + (q.count || 0), 0)}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Dispatcher/Admin queues needing action
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ borderLeft: '4px solid #d32f2f' }}>
+            <CardContent>
+              <Box display="flex" alignItems="center">
+                <Warning sx={{ mr: 1, color: '#d32f2f' }} />
+                <Typography variant="h6">Onsite Alerts</Typography>
+              </Box>
+              <Typography variant="h4">{workflowSummary?.onsite_too_long_count || 0}</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Tickets onsite too long
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ borderLeft: '4px solid #6a1b9a' }}>
+            <CardContent>
+              <Box display="flex" alignItems="center">
+                <Assessment sx={{ mr: 1, color: '#6a1b9a' }} />
+                <Typography variant="h6">NRO Pending</Typography>
+              </Box>
+              <Typography variant="h4">
+                {(workflowSummary?.nro_phase1_pending_count || 0) + (workflowSummary?.nro_phase2_pending_count || 0)}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Phase 1/2 items not completed
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
       </Grid>
+
+      {workflowSummary && (
+        <Paper sx={{ p: 2, mb: 2 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>
+            Workflow Queue Snapshot
+          </Typography>
+          <Grid container spacing={2}>
+            {(workflowSummary.queue_aging || []).map((q) => (
+              <Grid item xs={12} sm={6} md={3} key={q.queue}>
+                <Card variant="outlined">
+                  <CardContent>
+                    <Typography variant="subtitle2" sx={{ textTransform: 'capitalize' }}>{q.queue}</Typography>
+                    <Typography variant="h6">{q.count}</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Avg age: {q.avg_age_hours}h (max {q.max_age_hours}h)
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+            ))}
+          </Grid>
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Expected Return Outstanding Tickets</Typography>
+            {(workflowSummary.returns_outstanding_ticket_ids || []).length ? (
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                {workflowSummary.returns_outstanding_ticket_ids.slice(0, 25).map((id) => (
+                  <Chip key={id} size="small" label={id} />
+                ))}
+              </Box>
+            ) : (
+              <Typography variant="caption" color="text.secondary">No outstanding expected returns.</Typography>
+            )}
+          </Box>
+        </Paper>
+      )}
 
       {/* Charts */}
       <Grid container spacing={3}>
@@ -393,7 +477,7 @@ function Reports() {
                 <YAxis />
                 <RechartsTooltip />
                 <Area type="monotone" dataKey="tickets" stackId="1" stroke="#8884d8" fill="#8884d8" />
-                <Area type="monotone" dataKey="closed" stackId="1" stroke="#82ca9d" fill="#82ca9d" />
+                <Area type="monotone" dataKey="completed" stackId="1" stroke="#82ca9d" fill="#82ca9d" />
               </AreaChart>
             </ResponsiveContainer>
           </Paper>

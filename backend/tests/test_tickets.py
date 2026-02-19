@@ -241,3 +241,40 @@ def test_nro_phase_transition_fields(auth_headers, ensure_test_site, test_site_i
     d3 = p2_sched.json()
     assert d3.get("nro_phase2_scheduled_date") == "2026-03-09"
     assert d3.get("nro_phase2_state") == "scheduled"
+
+
+def test_workflow_summary_report(auth_headers):
+    """Workflow summary report should return operational metrics for admin/dispatcher."""
+    resp = client.get("/tickets/reports/workflow-summary?lookback_days=30&onsite_alert_minutes=120", headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert "status_counts" in data
+    assert "workflow_state_counts" in data
+    assert "queue_aging" in data
+    assert "onsite_too_long_count" in data
+    assert "returns_outstanding_count" in data
+    assert "returns_outstanding_ticket_ids" in data
+
+
+def test_ticket_audits_endpoint(auth_headers, ensure_test_site, test_site_id):
+    """Ticket audit timeline endpoint should return entries for ticket changes."""
+    create_resp = client.post(
+        "/tickets/",
+        json={"site_id": test_site_id, "type": "inhouse", "status": "open"},
+        headers=auth_headers,
+    )
+    assert create_resp.status_code == 200, create_resp.text
+    ticket_id = create_resp.json()["ticket_id"]
+    update_resp = client.put(
+        f"/tickets/{ticket_id}",
+        json={"notes": "audit-note"},
+        headers=auth_headers,
+    )
+    assert update_resp.status_code == 200, update_resp.text
+
+    audits_resp = client.get(f"/tickets/{ticket_id}/audits?limit=50", headers=auth_headers)
+    assert audits_resp.status_code == 200, audits_resp.text
+    data = audits_resp.json()
+    assert isinstance(data, list)
+    assert len(data) >= 1
+    assert all(a.get("ticket_id") == ticket_id for a in data)

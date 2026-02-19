@@ -114,6 +114,7 @@ function CompactTicketDetail() {
   const [ticket, setTicket] = useState(null);
   const [comments, setComments] = useState([]);
   const [timeEntries, setTimeEntries] = useState([]);
+  const [audits, setAudits] = useState([]);
   const [tab, setTab] = useState(0);
   const [newComment, setNewComment] = useState('');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -128,13 +129,14 @@ function CompactTicketDetail() {
     loadingRef.current = true;
     
     try {
-      const [t, c, te, sh, inv, tk] = await Promise.all([
+      const [t, c, te, sh, inv, tk, au] = await Promise.all([
         api.get(`/tickets/${ticketId}`),
         api.get(`/tickets/${ticketId}/comments`),
         api.get(`/tickets/${ticketId}/time-entries/`),
         api.get(`/shipments?ticket_id=${ticketId}&limit=200&skip=0`),
         api.get('/inventory?limit=200&skip=0'),
-        api.get(`/tasks?ticket_id=${ticketId}&limit=200`)
+        api.get(`/tasks?ticket_id=${ticketId}&limit=200`),
+        api.get(`/tickets/${ticketId}/audits?limit=200`)
       ]);
       setTicket(t);
       setComments(c || []);
@@ -142,6 +144,7 @@ function CompactTicketDetail() {
       setShipments(sh || []);
       setInventory(inv || []);
       setTasks(tk || []);
+      setAudits(au || []);
     } catch (err) {
       showError('Failed to load');
     } finally {
@@ -262,6 +265,14 @@ function CompactTicketDetail() {
             )}
           </Stack>
         </Stack>
+        <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
+          {ticket.follow_up_required && (
+            <Chip size="small" color={ticket.parts_received ? 'success' : 'warning'} label={ticket.parts_received ? 'Expected Return Received' : 'Expected Return Outstanding'} />
+          )}
+          {ticket.workflow_state && (
+            <Chip size="small" variant="outlined" label={`Workflow: ${ticket.workflow_state.replaceAll('_', ' ')}`} />
+          )}
+        </Stack>
 
         {onsiteAlert && (
           <Alert severity="error" icon={<Warning />} sx={{ mb: 2 }}>
@@ -321,6 +332,7 @@ function CompactTicketDetail() {
             <Tab label={`Time Entries (${timeEntries.length})`} sx={{ fontSize: '0.875rem', minHeight: 40 }} />
             <Tab label={`Tasks (${tasks.length})`} sx={{ fontSize: '0.875rem', minHeight: 40 }} />
             <Tab label={`Shipments (${shipments.length})`} sx={{ fontSize: '0.875rem', minHeight: 40 }} />
+            <Tab label={`Audit (${audits.length})`} sx={{ fontSize: '0.875rem', minHeight: 40 }} />
           </Tabs>
 
           {tab === 0 && (
@@ -417,9 +429,11 @@ function CompactTicketDetail() {
                     <TableCell>ID</TableCell>
                     <TableCell>Site</TableCell>
                     <TableCell>Item</TableCell>
-                      <TableCell>Qty</TableCell>
-                      <TableCell>Status</TableCell>
-                      <TableCell>Tracking</TableCell>
+                    <TableCell>Qty</TableCell>
+                    <TableCell>Status</TableCell>
+                    <TableCell>Tracking</TableCell>
+                    <TableCell>Return Tracking</TableCell>
+                    <TableCell>Returned</TableCell>
                     <TableCell>Shipped</TableCell>
                   </TableRow>
                 </TableHead>
@@ -429,23 +443,55 @@ function CompactTicketDetail() {
                       <TableCell>{s.shipment_id}</TableCell>
                       <TableCell>{`${s.site?.site_id || s.site_id || ''}${s.site?.location ? ' - ' + s.site.location : ''}`}</TableCell>
                       <TableCell>{s.item?.name || s.item_id}</TableCell>
-                        <TableCell>{s.quantity ?? 1}</TableCell>
-                        <TableCell>{s.status}</TableCell>
-                        <TableCell>
-                          {s.tracking_number ? (
-                            <a href={`https://www.fedex.com/fedextrack/?tracknumbers=${encodeURIComponent(s.tracking_number)}`} target="_blank" rel="noreferrer">
-                              {s.tracking_number}
-                            </a>
-                          ) : '-'}
-                        </TableCell>
+                      <TableCell>{s.quantity ?? 1}</TableCell>
+                      <TableCell>{s.status}</TableCell>
+                      <TableCell>
+                        {s.tracking_number ? (
+                          <a href={`https://www.fedex.com/fedextrack/?tracknumbers=${encodeURIComponent(s.tracking_number)}`} target="_blank" rel="noreferrer">
+                            {s.tracking_number}
+                          </a>
+                        ) : '-'}
+                      </TableCell>
+                      <TableCell>{s.return_tracking || '-'}</TableCell>
+                      <TableCell>{s.date_returned ? new Date(s.date_returned).toLocaleDateString() : '-'}</TableCell>
                       <TableCell>{s.date_shipped ? new Date(s.date_shipped).toLocaleString() : '-'}</TableCell>
                     </TableRow>
                   ))}
                   {shipments.length === 0 && (
-                    <TableRow><TableCell colSpan={6} align="center">No shipments yet</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={9} align="center">No shipments yet</TableCell></TableRow>
                   )}
                 </TableBody>
               </Table>
+            </Box>
+          )}
+
+          {tab === 4 && (
+            <Box sx={{ mt: 2 }}>
+              <Stack spacing={1}>
+                {audits.map((a) => (
+                  <Paper key={a.audit_id} sx={{ p: 1, bgcolor: codeBlockBg }}>
+                    <Stack direction="row" justifyContent="space-between">
+                      <Typography variant="caption" sx={{ fontWeight: 700 }}>
+                        {a.field_changed}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {a.change_time ? new Date(a.change_time).toLocaleString() : 'N/A'}
+                      </Typography>
+                    </Stack>
+                    <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>
+                      User: {a.user_id || 'system'}
+                    </Typography>
+                    {(a.old_value || a.new_value) && (
+                      <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>
+                        {a.old_value ? `From: ${a.old_value}` : ''}{a.old_value && a.new_value ? ' -> ' : ''}{a.new_value ? `To: ${a.new_value}` : ''}
+                      </Typography>
+                    )}
+                  </Paper>
+                ))}
+                {audits.length === 0 && (
+                  <Typography variant="body2" color="text.secondary">No audit entries for this ticket.</Typography>
+                )}
+              </Stack>
             </Box>
           )}
         </Box>
