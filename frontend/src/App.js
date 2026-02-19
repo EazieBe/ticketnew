@@ -102,6 +102,8 @@ import Audit from './Audit';
 import FieldTechMap from './FieldTechMap';
 import TicketClaim from './TicketClaim';
 import DispatchQueue from './DispatchQueue';
+import CompactSidebar from './components/CompactSidebar';
+import CompactNewTicketStepper from './components/CompactNewTicketStepper';
 import SettingsPage from './Settings';
 import Profile from './Profile';
 
@@ -113,7 +115,8 @@ import { useToast } from './contexts/ToastContext';
 const ModernDashboard = lazy(() => import('./components/ModernDashboard'));
 const Reports = lazy(() => import('./Reports'));
 
-const drawerWidth = 248;
+const drawerWidthOpen = 260;
+const drawerWidthCollapsed = 72;
 
 // SiteFormWrapper component to handle form submission
 function SiteFormWrapper() {
@@ -603,19 +606,27 @@ function CompactTicketFormWrapper() {
   const navigate = useNavigate();
   const api = useApi();
   const { success, error } = useToast();
-  
+
   const handleSubmit = async (values) => {
+    const cleanedData = stripTicketReadOnlyFields(cleanFormData(values));
+    await api.post('/tickets/', cleanedData);
+    success('Ticket created');
+    navigate('/tickets');
+  };
+
+  const handleSubmitForStepper = async (values) => {
     try {
       const cleanedData = stripTicketReadOnlyFields(cleanFormData(values));
       await api.post('/tickets/', cleanedData);
       success('Ticket created');
-      navigate('/tickets');
     } catch (err) {
       const msg = err?.response?.data?.detail || err?.message || 'Failed to create ticket';
       error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+      throw err;
     }
   };
-  return <CompactTicketFormComplete onSubmit={handleSubmit} initialValues={{}} isEdit={false} />;
+
+  return <CompactNewTicketStepper onSubmit={handleSubmitForStepper} />;
 }
 
 function CompactTicketEditWrapper() {
@@ -1179,6 +1190,10 @@ const colorThemes = {
   indigo: {
     primary: { main: '#3f51b5', light: '#5c6bc0', dark: '#303f9f' },
     secondary: { main: '#ff9800', light: '#ffb74d', dark: '#f57c00' }
+  },
+  ticketnew: {
+    primary: { main: '#1976d2', light: '#42a5f5', dark: '#1565c0' },
+    secondary: { main: '#00c853', light: '#5efc82', dark: '#009624' }
   }
 };
 
@@ -1186,8 +1201,8 @@ const colorThemes = {
 const createAppTheme = (darkMode, colorTheme = 'blue') => createTheme({
   palette: {
     mode: darkMode ? 'dark' : 'light',
-    primary: colorThemes[colorTheme].primary,
-    secondary: colorThemes[colorTheme].secondary,
+    primary: colorThemes[colorTheme]?.primary || colorThemes.blue.primary,
+    secondary: colorThemes[colorTheme]?.secondary || colorThemes.blue.secondary,
     background: {
       default: darkMode ? '#0a0a0a' : '#fafafa',
       paper: darkMode ? '#1a1a1a' : '#ffffff',
@@ -1216,13 +1231,14 @@ const createAppTheme = (darkMode, colorTheme = 'blue') => createTheme({
     button: { fontSize: '0.8125rem', fontWeight: 500 },
   },
   shape: {
-    borderRadius: 8,
+    borderRadius: 12,
   },
   components: {
     MuiCard: {
       styleOverrides: {
         root: {
-          boxShadow: darkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.1)',
+          borderRadius: 16,
+          boxShadow: darkMode ? '0 4px 20px rgba(0,0,0,0.2)' : '0 4px 20px rgba(0,0,0,0.06)',
           backgroundColor: darkMode ? '#1a1a1a' : '#ffffff',
           border: darkMode ? '1px solid #333333' : '1px solid #e0e0e0',
         },
@@ -1254,9 +1270,18 @@ const createAppTheme = (darkMode, colorTheme = 'blue') => createTheme({
       styleOverrides: {
         root: {
           borderBottom: darkMode ? '1px solid #333333' : '1px solid #e0e0e0',
-          padding: '6px 12px',
+          padding: '12px 16px',
           fontSize: '0.8125rem',
         },
+        head: {
+          fontWeight: 700,
+          backgroundColor: darkMode ? '#2d2d2d' : 'rgba(25, 118, 210, 0.05)',
+        },
+      },
+    },
+    MuiStepper: {
+      styleOverrides: {
+        root: { padding: '24px 0' },
       },
     },
     MuiChip: {
@@ -1418,10 +1443,12 @@ function AppLayout() {
   const { user, logout, loading } = useAuth();
   const { notifications, unreadCount, markAsRead, markAllAsRead, clearAll, clearNotification } = useNotifications();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [userMenuAnchor, setUserMenuAnchor] = useState(null);
   const [notificationsAnchor, setNotificationsAnchor] = useState(null);
   const [expandedItems, setExpandedItems] = useState(new Set(['main']));
   const [themeDialogOpen, setThemeDialogOpen] = useState(false);
+  const drawerWidth = sidebarCollapsed ? drawerWidthCollapsed : drawerWidthOpen;
   
   // Load theme preferences from localStorage
   const [darkMode, setDarkMode] = useState(() => {
@@ -1554,121 +1581,11 @@ function AppLayout() {
     return breadcrumbs;
   };
 
-  const drawer = (
-    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {/* Logo/Brand */}
-      <Box sx={{ 
-        p: 2, 
-        borderBottom: 1, 
-        borderColor: 'divider'
-      }}>
-        <Logo size="medium" showText={true} variant="build" />
-      </Box>
-
-      {/* Navigation */}
-      <Box sx={{ flex: 1, overflow: 'auto', py: 1 }}>
-        {/* Main Navigation */}
-        <List>
-          <ListItem disablePadding>
-            <ListItemButton
-              onClick={() => toggleExpanded('main')}
-              sx={{ px: 2 }}
-            >
-              <ListItemIcon>
-                <Home />
-              </ListItemIcon>
-              <ListItemText primary="Main" />
-              {expandedItems.has('main') ? <ExpandLess /> : <ExpandMore />}
-            </ListItemButton>
-          </ListItem>
-          
-          {expandedItems.has('main') && (
-            <List component="div" disablePadding>
-              {navigationItems.map((item) => (
-                <ListItem key={item.path} disablePadding>
-                  <ListItemButton
-                    selected={location.pathname === item.path}
-                    onClick={() => navigate(item.path)}
-                    sx={{ pl: 5 }}
-                  >
-                    <ListItemIcon>{item.icon}</ListItemIcon>
-                    <ListItemText primary={item.title} />
-                    {item.badge && (
-                      <Badge badgeContent={item.badge} color="error" />
-                    )}
-                  </ListItemButton>
-                </ListItem>
-              ))}
-            </List>
-          )}
-        </List>
-
-        <Divider sx={{ my: 2 }} />
-
-        {/* Admin Navigation */}
-        {canUseDispatchTools(user) && (
-          <List>
-            <ListItem disablePadding>
-              <ListItemButton
-                onClick={() => toggleExpanded('admin')}
-                sx={{ px: 2 }}
-              >
-                <ListItemIcon>
-                  <AdminPanelSettings />
-                </ListItemIcon>
-                <ListItemText primary="Admin / Dispatch" />
-                {expandedItems.has('admin') ? <ExpandLess /> : <ExpandMore />}
-              </ListItemButton>
-            </ListItem>
-            
-            {expandedItems.has('admin') && (
-              <List component="div" disablePadding>
-                {adminItems.map((item) => (
-                  <ListItem key={item.path} disablePadding>
-                    <ListItemButton
-                      selected={location.pathname === item.path}
-                      onClick={() => navigate(item.path)}
-                      sx={{ pl: 5 }}
-                    >
-                      <ListItemIcon>{item.icon}</ListItemIcon>
-                      <ListItemText primary={item.title} />
-                      {item.badge && (
-                        <Badge badgeContent={item.badge} color="error" />
-                      )}
-                    </ListItemButton>
-                  </ListItem>
-                ))}
-              </List>
-            )}
-          </List>
-        )}
-      </Box>
-
-      {/* User Profile */}
-      <Box sx={{ 
-        p: 2, 
-        borderTop: 1, 
-        borderColor: 'divider',
-        backgroundColor: 'background.paper'
-      }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <Avatar sx={{ width: 40, height: 40 }}>
-            {user?.name?.charAt(0) || 'U'}
-          </Avatar>
-          <Box sx={{ flex: 1, minWidth: 0 }}>
-            <Typography variant="body2" sx={{ fontWeight: 600 }}>
-              {user?.name || 'User'}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              {user?.role || 'User'}
-            </Typography>
-          </Box>
-          <IconButton size="small" onClick={handleUserMenuOpen}>
-            <KeyboardArrowDown />
-          </IconButton>
-        </Box>
-      </Box>
-    </Box>
+  const drawerContent = (
+    <CompactSidebar
+      open={!sidebarCollapsed}
+      onToggle={() => setSidebarCollapsed((s) => !s)}
+    />
   );
 
   if (loading) {
@@ -1836,13 +1753,14 @@ function AppLayout() {
               '& .MuiDrawer-paper': { 
                 boxSizing: 'border-box', 
                 width: drawerWidth,
+                transition: 'width 0.2s ease',
                 backgroundColor: 'background.paper',
                 borderRight: 1,
                 borderColor: 'divider'
               },
             }}
           >
-            {drawer}
+            {drawerContent}
           </Drawer>
           <Drawer
             variant="permanent"
@@ -1851,6 +1769,7 @@ function AppLayout() {
               '& .MuiDrawer-paper': { 
                 boxSizing: 'border-box', 
                 width: drawerWidth,
+                transition: 'width 0.2s ease',
                 backgroundColor: 'background.paper',
                 borderRight: 1,
                 borderColor: 'divider'
@@ -1858,7 +1777,7 @@ function AppLayout() {
             }}
             open
           >
-            {drawer}
+            {drawerContent}
           </Drawer>
         </Box>
 
