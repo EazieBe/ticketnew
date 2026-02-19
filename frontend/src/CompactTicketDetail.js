@@ -4,7 +4,7 @@ import {
   Box, Paper, Grid, Typography, Chip, Button, Stack, Tabs, Tab, TextField,
   Table, TableBody, TableCell, TableHead, TableRow, Alert, Divider, Dialog,
   DialogTitle, DialogContent, DialogActions, DialogContentText, Select, MenuItem,
-  InputLabel, FormControl, Checkbox, FormControlLabel
+  InputLabel, FormControl, Checkbox, FormControlLabel, Tooltip
 } from '@mui/material';
 import { ArrowBack, Edit, AccessTime, CheckCircle, Warning, Delete, PanTool, Timer, Assignment } from '@mui/icons-material';
 import { useToast } from './contexts/ToastContext';
@@ -480,7 +480,9 @@ function CompactTicketDetail() {
         <Box sx={{ mt: 2 }}>
           <Tabs value={tab} onChange={(e, v) => setTab(v)} sx={{ borderBottom: 1, borderColor: 'divider' }}>
             <Tab label={`Comments (${comments.length})`} sx={{ fontSize: '0.875rem', minHeight: 40 }} />
-            <Tab label={`Time Entries (${timeEntries.length})`} sx={{ fontSize: '0.875rem', minHeight: 40 }} />
+            <Tooltip title="Manual and auto time segments (e.g. from check-in/out). Who worked and how long.">
+              <Tab label={`Time Entries (${timeEntries.length})`} sx={{ fontSize: '0.875rem', minHeight: 40 }} />
+            </Tooltip>
             <Tab label={`Tasks (${tasks.length})`} sx={{ fontSize: '0.875rem', minHeight: 40 }} />
             <Tab label={`Shipments (${shipments.length})`} sx={{ fontSize: '0.875rem', minHeight: 40 }} />
             <Tab label={`Audit (${audits.length})`} sx={{ fontSize: '0.875rem', minHeight: 40 }} />
