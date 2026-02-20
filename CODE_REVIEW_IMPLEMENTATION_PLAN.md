@@ -101,9 +101,9 @@ Reference for what we discussed and implemented. Use for lookback and to mark of
 
 ## UI Polish Package (Feb 2026)
 
-- [ ] **Theme** – Apply ticketnew-style palette and component overrides (MuiButton, MuiCard, MuiChip, MuiStepper, MuiTableCell) in `createAppTheme`.
-- [ ] **Sidebar** – Collapsible sidebar with prominent “New Ticket” button, role-aware nav (admin/dispatcher section), same routes as current drawer.
-- [ ] **Ticket creation stepper** – Multi-step “Create New Ticket” flow (Basic → Type details → Scheduling & assignment → Notes & review) to reduce clutter and guide users; same backend API and payload as current form.
+- [x] **Theme** – Apply ticketnew-style palette and component overrides (MuiButton, MuiCard, MuiChip, MuiStepper, MuiTableCell) in `createAppTheme`.
+- [x] **Sidebar** – Collapsible sidebar with prominent “New Ticket” button, role-aware nav (admin/dispatcher section), same routes as current drawer.
+- [x] **Ticket creation stepper** – Multi-step “Create New Ticket” flow (Basic → Type details → Scheduling & assignment → Notes & review) to reduce clutter and guide users; same backend API and payload as current form.
 - [ ] **Wireframes** – Optional: align final UI with provided wireframe sketches.
 
 ---
@@ -120,16 +120,16 @@ Reference for what we discussed and implemented. Use for lookback and to mark of
 
 ## Technical debt & risks
 
-- [ ] **`Base.metadata.create_all()` in startup** – Dangerous in production. Remove or guard so schema changes come only from Alembic; ensure startup does not create/drop tables.
+- [x] **`Base.metadata.create_all()` in startup** – Dangerous in production. Remove or guard so schema changes come only from Alembic; ensure startup does not create/drop tables. (Guarded: runs only when `CREATE_TABLES_ON_STARTUP=1`; production should rely on Alembic.)
 - [ ] **Alembic migrations** – Ensure migrations are run in deployment/CI and documented (e.g. in README or runbook). Migrations exist in `backend/alembic/versions/`; make sure they are applied in every environment.
 - [ ] **Frontend: plain JS + old CRA + many Contexts** – Scaling risk (bundle size, context re-renders). Plan: consider TypeScript, CRA → Vite or similar, and consolidating or splitting Contexts as the app grows.
 - [ ] **WebSocket client mismatch** – Frontend uses `socket.io-client`; backend may use native FastAPI WebSockets. Align client and server (either both Socket.IO or both native WS) and document the contract.
-- [ ] **Tests visibility** – Backend has pytest (e.g. `backend/tests/`); frontend has some Jest. Ensure tests are documented, run in CI, and visible (e.g. README “How to run tests”). Add or surface tests so reviewers and new devs see them.
+- [x] **Tests visibility** – Backend has pytest (e.g. `backend/tests/`); frontend has some Jest. Ensure tests are documented, run in CI, and visible (e.g. README “How to run tests”). Add or surface tests so reviewers and new devs see them.
 
 ---
 
 ## Other follow-ups
 
-- [ ] Document “how to run the app” (dev vs prod) and “how to run tests” in README or CONTRIBUTING.
+- [x] Document “how to run the app” (dev vs prod) and “how to run tests” in README or CONTRIBUTING.
 - [ ] Consider explicit string lengths on `Column(String)` in models (e.g. 255 for names) and a migration if needed.
 - [ ] Optional: runtime mode indicator (dev/prod) in UI – implemented; verify it’s visible in production build.

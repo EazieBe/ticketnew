@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
+import { alpha } from '@mui/material/styles';
 import {
   Box,
   CssBaseline,
@@ -1191,27 +1192,36 @@ const colorThemes = {
     primary: { main: '#3f51b5', light: '#5c6bc0', dark: '#303f9f' },
     secondary: { main: '#ff9800', light: '#ffb74d', dark: '#f57c00' }
   },
-  ticketnew: {
+  ics: {
     primary: { main: '#1976d2', light: '#42a5f5', dark: '#1565c0' },
     secondary: { main: '#00c853', light: '#5efc82', dark: '#009624' }
   }
 };
 
-// Modern theme with better colors and spacing
-const createAppTheme = (darkMode, colorTheme = 'blue') => createTheme({
+// Modern theme with better colors and spacing; primary tint used for table/chip/list so theme change affects all UI
+const createAppTheme = (darkMode, colorTheme = 'blue') => {
+  const primary = colorThemes[colorTheme]?.primary || colorThemes.blue.primary;
+  const primaryMain = primary.main;
+  const primaryTint05 = alpha(primaryMain, 0.05);
+  const primaryTint08 = alpha(primaryMain, 0.08);
+  const primaryTint12 = alpha(primaryMain, 0.12);
+  const primaryTint16 = alpha(primaryMain, 0.16);
+  const primaryTint20 = alpha(primaryMain, 0.2);
+  const primaryTint25 = alpha(primaryMain, 0.25);
+  return createTheme({
   palette: {
     mode: darkMode ? 'dark' : 'light',
-    primary: colorThemes[colorTheme]?.primary || colorThemes.blue.primary,
+    primary: primary,
     secondary: colorThemes[colorTheme]?.secondary || colorThemes.blue.secondary,
     background: {
-      default: darkMode ? '#0a0a0a' : '#fafafa',
+      default: darkMode ? '#0a0a0a' : '#f0f4f8',
       paper: darkMode ? '#1a1a1a' : '#ffffff',
     },
     text: {
-      primary: darkMode ? '#ffffff' : '#1a1a1a',
-      secondary: darkMode ? '#b0b0b0' : '#666666',
+      primary: darkMode ? '#ffffff' : '#1a202c',
+      secondary: darkMode ? '#b0b0b0' : '#4a5568',
     },
-    divider: darkMode ? '#333333' : '#e0e0e0',
+    divider: darkMode ? '#333333' : '#e8ecf0',
     action: {
       hover: darkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)',
       selected: darkMode ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.08)',
@@ -1220,68 +1230,81 @@ const createAppTheme = (darkMode, colorTheme = 'blue') => createTheme({
   typography: {
     fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif',
     fontSize: 14,
+    h1: { fontSize: '2.25rem', fontWeight: 700 },
+    h2: { fontSize: '1.75rem', fontWeight: 600 },
+    h3: { fontSize: '1.5rem', fontWeight: 600 },
     h4: { fontSize: '1.25rem', fontWeight: 700 },
     h5: { fontSize: '1.1rem', fontWeight: 600 },
-    h6: { fontSize: '1rem', fontWeight: 600 },
+    h6: { fontSize: '1.1rem', fontWeight: 600 },
     subtitle1: { fontSize: '0.9rem', fontWeight: 600 },
     subtitle2: { fontSize: '0.8rem', fontWeight: 600 },
     body1: { fontSize: '0.875rem' },
     body2: { fontSize: '0.8125rem' },
     caption: { fontSize: '0.75rem' },
-    button: { fontSize: '0.8125rem', fontWeight: 500 },
+    button: { fontSize: '0.8125rem', fontWeight: 600, textTransform: 'none' },
   },
   shape: {
-    borderRadius: 12,
+    borderRadius: 14,
   },
   components: {
     MuiCard: {
       styleOverrides: {
         root: {
-          borderRadius: 16,
-          boxShadow: darkMode ? '0 4px 20px rgba(0,0,0,0.2)' : '0 4px 20px rgba(0,0,0,0.06)',
+          borderRadius: 18,
+          boxShadow: darkMode
+            ? '0 4px 6px rgba(0,0,0,0.07), 0 12px 28px rgba(0,0,0,0.15)'
+            : '0 2px 4px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.06)',
           backgroundColor: darkMode ? '#1a1a1a' : '#ffffff',
-          border: darkMode ? '1px solid #333333' : '1px solid #e0e0e0',
+          border: darkMode ? '1px solid #2d2d2d' : '1px solid rgba(0,0,0,0.06)',
         },
       },
     },
     MuiPaper: {
       styleOverrides: {
         root: {
+          borderRadius: 16,
           backgroundColor: darkMode ? '#1a1a1a' : '#ffffff',
-          border: darkMode ? '1px solid #333333' : '1px solid #e0e0e0',
+          border: darkMode ? '1px solid #2d2d2d' : '1px solid rgba(0,0,0,0.06)',
+          boxShadow: darkMode
+            ? '0 2px 8px rgba(0,0,0,0.12)'
+            : '0 2px 4px rgba(0,0,0,0.04), 0 6px 16px rgba(0,0,0,0.04)',
         },
       },
     },
     MuiTableContainer: {
       styleOverrides: {
         root: {
+          borderRadius: 16,
+          overflow: 'hidden',
           backgroundColor: darkMode ? '#1a1a1a' : '#ffffff',
+          boxShadow: darkMode ? '0 2px 8px rgba(0,0,0,0.12)' : '0 2px 4px rgba(0,0,0,0.04), 0 6px 16px rgba(0,0,0,0.04)',
         },
       },
     },
     MuiTableHead: {
       styleOverrides: {
         root: {
-          backgroundColor: darkMode ? '#2d2d2d' : '#f5f5f5',
+          backgroundColor: darkMode ? '#242424' : '#f8fafc',
         },
       },
     },
     MuiTableCell: {
       styleOverrides: {
         root: {
-          borderBottom: darkMode ? '1px solid #333333' : '1px solid #e0e0e0',
-          padding: '12px 16px',
+          borderBottom: darkMode ? '1px solid #2d2d2d' : '1px solid #e8ecf0',
+          padding: '14px 18px',
           fontSize: '0.8125rem',
         },
         head: {
           fontWeight: 700,
-          backgroundColor: darkMode ? '#2d2d2d' : 'rgba(25, 118, 210, 0.05)',
+          backgroundColor: darkMode ? '#242424' : primaryTint05,
+          fontSize: '0.8125rem',
         },
       },
     },
     MuiStepper: {
       styleOverrides: {
-        root: { padding: '24px 0' },
+        root: { padding: '28px 0' },
       },
     },
     MuiChip: {
@@ -1289,9 +1312,11 @@ const createAppTheme = (darkMode, colorTheme = 'blue') => createTheme({
         root: {
           backgroundColor: darkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
           color: darkMode ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.87)',
-          height: 22,
+          height: 24,
           fontSize: '0.75rem',
-          '& .MuiChip-label': { px: 0.75, color: 'inherit' },
+          fontWeight: 600,
+          borderRadius: 10,
+          '& .MuiChip-label': { px: 1, color: 'inherit' },
         },
       },
     },
@@ -1299,8 +1324,13 @@ const createAppTheme = (darkMode, colorTheme = 'blue') => createTheme({
       styleOverrides: {
         root: {
           textTransform: 'none',
-          fontWeight: 500,
+          fontWeight: 600,
           fontSize: '0.8125rem',
+          borderRadius: 12,
+          boxShadow: 'none',
+          '&:hover': {
+            boxShadow: darkMode ? '0 4px 14px rgba(0,0,0,0.25)' : '0 2px 8px rgba(0,0,0,0.08)',
+          },
         },
       },
     },
@@ -1311,12 +1341,12 @@ const createAppTheme = (darkMode, colorTheme = 'blue') => createTheme({
           margin: '1px 6px',
           py: 0.75,
           '&:hover': {
-            backgroundColor: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(25,118,210,0.08)',
+            backgroundColor: darkMode ? 'rgba(255,255,255,0.08)' : primaryTint08,
           },
           '&.Mui-selected': {
-            backgroundColor: darkMode ? 'rgba(25,118,210,0.2)' : 'rgba(25,118,210,0.12)',
+            backgroundColor: darkMode ? primaryTint20 : primaryTint12,
             '&:hover': {
-              backgroundColor: darkMode ? 'rgba(25,118,210,0.25)' : 'rgba(25,118,210,0.16)',
+              backgroundColor: darkMode ? primaryTint25 : primaryTint16,
             },
           },
         },
@@ -1344,97 +1374,27 @@ const createAppTheme = (darkMode, colorTheme = 'blue') => createTheme({
       },
     },
   },
-});
+  });
+};
 
 const navigationItems = [
-  {
-    title: 'Daily Operations',
-    path: '/',
-    icon: <DashboardIcon sx={{ color: '#1976d2' }} />,
-    badge: null
-  },
-  {
-    title: 'Tickets',
-    path: '/tickets',
-    icon: <Assignment sx={{ color: '#dc004e' }} />,
-    badge: null
-  },
-  {
-    title: 'Sites',
-    path: '/sites',
-    icon: <Business sx={{ color: '#2e7d32' }} />,
-    badge: null
-  },
-  {
-    title: 'Shipping',
-    path: '/shipments',
-    icon: <LocalShipping sx={{ color: '#f57c00' }} />,
-    badge: null
-  },
-  {
-    title: 'Inventory',
-    path: '/inventory',
-    icon: <Build sx={{ color: '#7b1fa2' }} />,
-    badge: null
-  },
-  {
-    title: 'Companies',
-    path: '/companies',
-    icon: <Business sx={{ color: '#5d4037' }} />,
-    badge: null
-  },
-  {
-    title: 'Tasks',
-    path: '/tasks',
-    icon: <Assessment sx={{ color: '#3f51b5' }} />,
-    badge: null
-  },
-  // Equipment removed - only shown in Site Details as reference info
-  {
-    title: 'Audit',
-    path: '/audit',
-    icon: <Security sx={{ color: '#d32f2f' }} />,
-    badge: null
-  },
-  {
-    title: 'Users',
-    path: '/users',
-    icon: <Person sx={{ color: '#388e3c' }} />,
-    badge: null
-  },
-  {
-    title: 'Field Tech Map',
-    path: '/map',
-    icon: <Map sx={{ color: '#1976d2' }} />,
-    badge: null
-  },
-  {
-    title: 'SLA Management',
-    path: '/sla',
-    icon: <Speed sx={{ color: '#ff9800' }} />,
-    badge: null
-  }
+  { title: 'Daily Operations', path: '/', icon: <DashboardIcon />, badge: null },
+  { title: 'Tickets', path: '/tickets', icon: <Assignment />, badge: null },
+  { title: 'Sites', path: '/sites', icon: <Business />, badge: null },
+  { title: 'Shipping', path: '/shipments', icon: <LocalShipping />, badge: null },
+  { title: 'Inventory', path: '/inventory', icon: <Build />, badge: null },
+  { title: 'Companies', path: '/companies', icon: <Business />, badge: null },
+  { title: 'Tasks', path: '/tasks', icon: <Assessment />, badge: null },
+  { title: 'Audit', path: '/audit', icon: <Security />, badge: null },
+  { title: 'Users', path: '/users', icon: <Person />, badge: null },
+  { title: 'Field Tech Map', path: '/map', icon: <Map />, badge: null },
+  { title: 'SLA Management', path: '/sla', icon: <Speed />, badge: null }
 ];
 
 const adminItems = [
-  {
-    title: 'Dispatcher Queue',
-    path: '/dispatch-queue',
-    icon: <Assignment sx={{ color: '#1565c0' }} />,
-    badge: null
-  },
-  {
-    title: 'Reports',
-    path: '/reports',
-    icon: <Assessment sx={{ color: '#9c27b0' }} />,
-    badge: null
-  },
-  {
-    title: 'Settings',
-    path: '/settings',
-    icon: <Settings sx={{ color: '#607d8b' }} />,
-    badge: null
-  }
+  { title: 'Dispatcher Queue', path: '/dispatch-queue', icon: <Assignment />, badge: null },
+  { title: 'Reports', path: '/reports', icon: <Assessment />, badge: null },
+  { title: 'Settings', path: '/settings', icon: <Settings />, badge: null }
 ];
 
 const canUseDispatchTools = (user) => user?.role === 'admin' || user?.role === 'dispatcher';
@@ -1476,6 +1436,13 @@ function AppLayout() {
   useEffect(() => {
     localStorage.setItem('colorTheme', selectedColorTheme);
   }, [selectedColorTheme]);
+
+  // When Settings page changes theme (writes localStorage + dispatches event), sync state so UI updates
+  useEffect(() => {
+    const onThemeChange = (e) => e?.detail && setSelectedColorTheme(e.detail);
+    window.addEventListener('colorThemeChange', onThemeChange);
+    return () => window.removeEventListener('colorThemeChange', onThemeChange);
+  }, []);
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
@@ -1627,7 +1594,7 @@ function AppLayout() {
       <Box sx={{ 
         display: 'flex', 
         minHeight: '100vh',
-        backgroundColor: darkMode ? '#0a0a0a' : '#fafafa'
+        backgroundColor: 'background.default'
       }}>
         <CssBaseline />
         
@@ -1639,7 +1606,7 @@ function AppLayout() {
             ml: { sm: `${drawerWidth}px` },
             backgroundColor: 'background.paper',
             color: 'text.primary',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+            boxShadow: darkMode ? '0 1px 3px rgba(0,0,0,0.2)' : '0 1px 3px rgba(0,0,0,0.06)',
             zIndex: theme.zIndex.drawer + 1
           }}
         >
@@ -1786,10 +1753,10 @@ function AppLayout() {
           component="main"
           sx={{
             flexGrow: 1,
-            p: 2,
+            p: 3,
             width: { sm: `calc(100% - ${drawerWidth}px)` },
             mt: 6,
-            backgroundColor: darkMode ? '#0a0a0a' : '#fafafa',
+            backgroundColor: 'background.default',
             minHeight: 'calc(100vh - 48px)'
           }}
         >

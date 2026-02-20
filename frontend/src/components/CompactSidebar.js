@@ -68,8 +68,7 @@ export default function CompactSidebar({ open: isOpen = true, onToggle }) {
       <Box sx={{ display: 'flex', alignItems: 'center', px: 2, py: 1.5, justifyContent: isOpen ? 'space-between' : 'center' }}>
         {isOpen ? (
           <Box sx={{ fontWeight: 700, fontSize: '1.25rem', color: 'primary.main', display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Logo size="small" showText={false} variant="build" />
-            <span>ticketnew</span>
+            <Logo size="small" showText={true} variant="build" />
           </Box>
         ) : null}
         {onToggle && (
@@ -80,16 +79,18 @@ export default function CompactSidebar({ open: isOpen = true, onToggle }) {
       </Box>
       <Divider />
 
-      <List sx={{ px: 1, py: 0, flex: 1 }}>
+      <List sx={{ px: 1.5, py: 0.5, flex: 1 }}>
         <ListItemButton
           onClick={() => navigate('/tickets/new')}
           sx={{
-            mx: 0,
-            mb: 1,
+            mx: 0.5,
+            mb: 1.5,
+            py: 1.25,
             borderRadius: 2,
             bgcolor: 'primary.main',
             color: 'white',
-            '&:hover': { bgcolor: 'primary.dark' },
+            boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+            '&:hover': { bgcolor: 'primary.dark', boxShadow: '0 4px 14px rgba(0,0,0,0.12)' },
           }}
         >
           <ListItemIcon sx={{ color: 'white', minWidth: 40 }}><Add /></ListItemIcon>
@@ -101,7 +102,7 @@ export default function CompactSidebar({ open: isOpen = true, onToggle }) {
             key={item.path}
             selected={location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path + '/'))}
             onClick={() => navigate(item.path)}
-            sx={{ borderRadius: 2, mx: 0 }}
+            sx={{ borderRadius: 2, mx: 0.5, py: 0.75 }}
           >
             <ListItemIcon sx={{ minWidth: 40 }}>{item.icon}</ListItemIcon>
             {isOpen && <ListItemText primary={item.text} primaryTypographyProps={{ fontSize: '0.875rem' }} />}
@@ -110,19 +111,19 @@ export default function CompactSidebar({ open: isOpen = true, onToggle }) {
 
         {canUseDispatchTools(user) && (
           <>
-            <ListItemButton onClick={() => setAdminOpen(!adminOpen)} sx={{ borderRadius: 2, mx: 0 }}>
+            <ListItemButton onClick={() => setAdminOpen(!adminOpen)} sx={{ borderRadius: 2, mx: 0.5, py: 0.75 }}>
               <ListItemIcon sx={{ minWidth: 40 }}><AdminPanelSettings /></ListItemIcon>
               {isOpen && <ListItemText primary="Admin / Dispatch" primaryTypographyProps={{ fontSize: '0.875rem' }} />}
               {isOpen && (adminOpen ? <ExpandLess /> : <ExpandMore />)}
             </ListItemButton>
             <Collapse in={adminOpen && isOpen}>
-              <List component="div" disablePadding>
+              <List component="div" disablePadding sx={{ px: 1 }}>
                 {adminItems.map((item) => (
                   <ListItemButton
                     key={item.path}
                     selected={location.pathname === item.path}
                     onClick={() => navigate(item.path)}
-                    sx={{ pl: 4, borderRadius: 2, py: 0.5 }}
+                    sx={{ pl: 4, borderRadius: 2, py: 0.6 }}
                   >
                     <ListItemText primary={item.text} primaryTypographyProps={{ fontSize: '0.8125rem' }} />
                   </ListItemButton>
@@ -134,7 +135,7 @@ export default function CompactSidebar({ open: isOpen = true, onToggle }) {
       </List>
 
       <Divider />
-      <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
+      <Box sx={{ p: 2.5, borderTop: 1, borderColor: 'divider' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <Avatar sx={{ width: 40, height: 40, fontSize: '0.875rem' }}>
             {user?.name?.charAt(0) || 'U'}

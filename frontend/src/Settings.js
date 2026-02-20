@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Typography,
@@ -9,24 +9,18 @@ import {
   FormControlLabel,
   Divider,
   Button,
-  Alert,
-  CircularProgress,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
-  IconButton,
-  Tooltip
 } from '@mui/material';
 import {
   Settings as SettingsIcon,
-  Notifications,
-  Security,
   Palette,
   Brightness4,
   Brightness7,
-  CheckCircle
 } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 import ThemePreview from './components/ThemePreview';
 
@@ -59,21 +53,19 @@ const colorThemes = {
 };
 
 function Settings() {
+  const navigate = useNavigate();
   const { user, darkMode, toggleDarkMode } = useAuth();
-  const [loading, setLoading] = useState(false);
-  const [success, setSuccess] = useState(false);
   const [themeDialogOpen, setThemeDialogOpen] = useState(false);
-  const [selectedColorTheme, setSelectedColorTheme] = useState('blue');
+  const [selectedColorTheme, setSelectedColorTheme] = useState(() => {
+    try { return localStorage.getItem('colorTheme') || 'blue'; } catch { return 'blue'; }
+  });
 
-  const handleSaveSettings = async () => {
-    setLoading(true);
-    // Simulate API call
-    setTimeout(() => {
-      setSuccess(true);
-      setLoading(false);
-      setTimeout(() => setSuccess(false), 3000);
-    }, 1000);
-  };
+  useEffect(() => {
+    try {
+      localStorage.setItem('colorTheme', selectedColorTheme);
+      window.dispatchEvent(new CustomEvent('colorThemeChange', { detail: selectedColorTheme }));
+    } catch (_) {}
+  }, [selectedColorTheme]);
 
   const handleThemeChange = (newTheme) => {
     setSelectedColorTheme(newTheme);
@@ -85,12 +77,6 @@ function Settings() {
       <Typography variant="h4" sx={{ mb: 3, fontWeight: 'bold' }}>
         Settings
       </Typography>
-
-      {success && (
-        <Alert severity="success" sx={{ mb: 3 }}>
-          Settings saved successfully!
-        </Alert>
-      )}
 
       <Grid container spacing={3}>
         {/* Appearance Settings */}
@@ -149,59 +135,7 @@ function Settings() {
           </Card>
         </Grid>
 
-        {/* Notification Settings */}
-        <Grid item xs={12} md={6}>
-          <Card className="card-hover">
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                <Notifications sx={{ mr: 1, color: 'primary.main' }} />
-                <Typography variant="h6">Notifications</Typography>
-              </Box>
-              <Divider sx={{ mb: 2 }} />
-              
-              <FormControlLabel
-                control={<Switch defaultChecked />}
-                label="Email Notifications"
-              />
-              <FormControlLabel
-                control={<Switch defaultChecked />}
-                label="Push Notifications"
-              />
-              <FormControlLabel
-                control={<Switch />}
-                label="SMS Notifications"
-              />
-            </CardContent>
-          </Card>
-        </Grid>
-
-        {/* Security Settings */}
-        <Grid item xs={12} md={6}>
-          <Card className="card-hover">
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                <Security sx={{ mr: 1, color: 'primary.main' }} />
-                <Typography variant="h6">Security</Typography>
-              </Box>
-              <Divider sx={{ mb: 2 }} />
-              
-              <FormControlLabel
-                control={<Switch defaultChecked />}
-                label="Two-Factor Authentication"
-              />
-              <FormControlLabel
-                control={<Switch defaultChecked />}
-                label="Session Timeout"
-              />
-              <FormControlLabel
-                control={<Switch />}
-                label="Login Notifications"
-              />
-            </CardContent>
-          </Card>
-        </Grid>
-
-        {/* User Profile */}
+        {/* User Profile summary – edit in Profile page */}
         <Grid item xs={12} md={6}>
           <Card className="card-hover">
             <CardContent>
@@ -220,24 +154,13 @@ function Settings() {
               <Typography variant="body2" color="text.secondary">
                 <strong>Role:</strong> {user?.role || 'User'}
               </Typography>
+              <Button size="small" variant="outlined" sx={{ mt: 1 }} onClick={() => navigate('/profile')}>
+                Edit profile
+              </Button>
             </CardContent>
           </Card>
         </Grid>
       </Grid>
-
-      <Box sx={{ mt: 3, display: 'flex', gap: 2 }}>
-        <Button 
-          variant="contained" 
-          onClick={handleSaveSettings}
-          disabled={loading}
-          startIcon={loading ? <CircularProgress size={20} /> : <CheckCircle />}
-        >
-          {loading ? 'Saving...' : 'Save Settings'}
-        </Button>
-        <Button variant="outlined">
-          Reset to Defaults
-        </Button>
-      </Box>
 
       {/* Theme Customization Dialog */}
       <Dialog 

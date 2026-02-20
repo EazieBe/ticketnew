@@ -281,6 +281,36 @@ cd frontend
 npm start
 ```
 
+## Testing
+
+### How to run the app (summary)
+- **Dev (recommended)**: `APP_MODE=dev ./start_app.sh` — backend with reload, frontend with HMR.
+- **Prod-style**: `APP_MODE=prod ./start_app.sh` — backend workers, static frontend.
+- **Manual**: Backend `cd backend && source ../venv/bin/activate && uvicorn main:app --host 0.0.0.0 --port 8000 --reload`; frontend `cd frontend && npm start`.
+
+### How to run tests
+
+**Backend (pytest)**  
+From the project root with the venv activated:
+```bash
+cd backend
+source ../venv/bin/activate
+pip install -e ".[dev]"   # if not already (installs pytest, pytest-asyncio, httpx)
+pytest
+```
+Or from repo root: `cd backend && source ../venv/bin/activate && pytest`
+
+Tests live in `backend/tests/` (e.g. `test_auth.py`, `test_tickets.py`, `test_shipments.py`, `test_sla.py`). Use `pytest -v` for verbose output or `pytest path/to/test_file.py` to run a single file.
+
+**Frontend (Jest / React Scripts)**  
+From the project root:
+```bash
+cd frontend
+npm install   # if not already
+npm test
+```
+Runs Jest in watch mode by default. Use `CI=true npm test` for a single run (e.g. in CI).
+
 ## Features
 
 - ✅ **Ticket Management**: Create, edit, and track support tickets

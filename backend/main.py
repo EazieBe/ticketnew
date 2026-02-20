@@ -25,12 +25,15 @@ os.environ.setdefault("SECRET_KEY", settings.SECRET_KEY)
 
 from utils.main_utils import verify_password, create_access_token, APILatencyTracker, timer_ms
 
-# Create database tables
-models.Base.metadata.create_all(bind=engine)
-
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ticketing")
+
+# Create database tables only when explicitly enabled (e.g. local dev).
+# In production, schema changes must come from Alembic migrations only.
+if os.environ.get("CREATE_TABLES_ON_STARTUP", "").strip().lower() in ("1", "true", "yes"):
+    models.Base.metadata.create_all(bind=engine)
+    logger.info("create_all ran (CREATE_TABLES_ON_STARTUP is set)")
 latency_tracker = APILatencyTracker(max_samples_per_key=600)
 
 # Redis connection for WebSocket broadcasting (async client)
