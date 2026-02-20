@@ -4,7 +4,7 @@ import {
   Box, Paper, Grid, Typography, Chip, Button, Stack, Tabs, Tab, TextField,
   Table, TableBody, TableCell, TableHead, TableRow, Alert, Divider, Dialog,
   DialogTitle, DialogContent, DialogActions, DialogContentText, Select, MenuItem,
-  InputLabel, FormControl, Checkbox, FormControlLabel, Tooltip
+  InputLabel, FormControl, Checkbox, FormControlLabel, Tooltip, Backdrop, CircularProgress
 } from '@mui/material';
 import { ArrowBack, Edit, AccessTime, CheckCircle, Warning, Delete, PanTool, Timer, Assignment } from '@mui/icons-material';
 import { useToast } from './contexts/ToastContext';
@@ -131,6 +131,7 @@ function CompactTicketDetail() {
     dateValue: '',
     notes: ''
   });
+  const [workflowSaving, setWorkflowSaving] = useState(false);
   const loadingRef = useRef(false);
 
   const load = async () => {
@@ -263,20 +264,29 @@ function CompactTicketDetail() {
   };
 
   const submitWorkflowDialog = async () => {
+    const previousTicket = ticket ? { ...ticket } : null;
+    const targetState = workflowDialog.targetState;
+    const scheduleDate = workflowDialog.requireDate ? workflowDialog.dateValue : undefined;
     try {
+      setWorkflowSaving(true);
+      closeWorkflowDialog();
+      setTicket((prev) => prev ? { ...prev, workflow_state: targetState, ticket_version: (prev.ticket_version || 1) + 1, ...(scheduleDate && { date_scheduled: scheduleDate }) } : prev);
       const payload = {
-        workflow_state: workflowDialog.targetState,
+        workflow_state: targetState,
         expected_ticket_version: ticket?.ticket_version || 1,
       };
       if (workflowDialog.requireDate) payload.schedule_date = workflowDialog.dateValue;
       if (workflowDialog.notes?.trim()) payload.notes = workflowDialog.notes.trim();
       await api.post(`/tickets/${ticketId}/workflow-transition`, payload);
       success('Workflow updated');
-      closeWorkflowDialog();
       await load();
     } catch (err) {
-      const msg = err?.response?.data?.detail?.message || err?.response?.data?.detail || err?.message || 'Workflow action failed';
+      if (previousTicket) setTicket(previousTicket);
+      const is409 = err?.response?.status === 409;
+      const msg = is409 ? 'Ticket was updated elsewhere. Please refresh and try again.' : (err?.response?.data?.detail?.message || err?.response?.data?.detail || err?.message || 'Workflow action failed');
       showError(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    } finally {
+      setWorkflowSaving(false);
     }
   };
 
@@ -300,7 +310,13 @@ function CompactTicketDetail() {
     ((new Date() - new Date(ticket.check_in_time)) / (1000 * 60 * 60)) >= 2;
 
   return (
-    <Box sx={{ p: 2 }}>
+    <Box sx={{ p: 2, position: 'relative' }}>
+      <Backdrop open={workflowSaving} sx={{ position: 'absolute', zIndex: (t) => t.zIndex.drawer - 1, color: 'primary.main' }}>
+        <Stack alignItems="center" spacing={2}>
+          <CircularProgress color="inherit" />
+          <Typography variant="body2">Saving…</Typography>
+        </Stack>
+      </Backdrop>
       <Paper sx={{ p: 2, mb: 2 }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
           <Stack direction="row" spacing={1} alignItems="center">
@@ -713,9 +729,10 @@ function CompactTicketDetail() {
           <Button
             variant="contained"
             onClick={submitWorkflowDialog}
-            disabled={workflowDialog.requireDate && !workflowDialog.dateValue}
+            disabled={(workflowDialog.requireDate && !workflowDialog.dateValue) || workflowSaving}
+            startIcon={workflowSaving ? <CircularProgress size={18} color="inherit" /> : null}
           >
-            Apply
+            {workflowSaving ? 'Saving…' : 'Apply'}
           </Button>
         </DialogActions>
       </Dialog>

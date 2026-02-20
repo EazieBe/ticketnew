@@ -228,6 +228,7 @@ class TicketBase(BaseModel):
     special_flag: Optional[str] = None
     last_updated_by: Optional[str] = None
     last_updated_at: Optional[datetime] = None
+    created_by: Optional[str] = None
     
     # New Ticket Type System Fields
     claimed_by: Optional[str] = None
@@ -689,8 +690,9 @@ class BulkTicketStatusUpdate(BaseModel):
     status: TicketStatus
 
 class WorkflowTransitionRequest(BaseModel):
+    """Required for workflow-transition and return_received; ensures optimistic locking."""
     workflow_state: TicketWorkflowState
-    expected_ticket_version: Optional[int] = None
+    expected_ticket_version: int = Field(..., ge=1, description="Current ticket version; 409 if stale")
     convert_to_type: Optional[TicketType] = None
     notes: Optional[str] = None
     schedule_date: Optional[date] = None
@@ -718,7 +720,7 @@ class WorkflowTransitionRequest(BaseModel):
 
 
 class ReturnReceiptRequest(BaseModel):
-    expected_ticket_version: Optional[int] = None
+    expected_ticket_version: int = Field(..., ge=1, description="Current ticket version; 409 if stale")
     notes: Optional[str] = None
 
     model_config = ConfigDict(extra="forbid")
@@ -729,16 +731,6 @@ class ReturnReceiptRequest(BaseModel):
         if v is None or not isinstance(v, str):
             return v
         return re.sub(r"[^\x20-\x7E\t\r\n]", "", v).strip()
-
-    @field_validator("expected_ticket_version", mode="before")
-    @classmethod
-    def validate_expected_version(cls, v):
-        if v is None:
-            return v
-        iv = int(v)
-        if iv < 1:
-            raise ValueError("expected_ticket_version must be >= 1")
-        return iv
 
 
 class QueueAgingMetric(BaseModel):

@@ -183,7 +183,7 @@ tickets, audits, shipments, inventory, users"]
 - Endpoint: `ws://<backend-host>:8000/ws/updates?token=<JWT>`
 
 ## Frontend Components (New Compact Build)
-- Tickets: `frontend/src/CompactTickets.js`, `frontend/src/CompactTicketDetail.js`, `frontend/src/CompactTicketFormComplete.js`
+- Tickets: `frontend/src/CompactTickets.js`, `frontend/src/CompactTicketDetail.js`, `frontend/src/CompactTicketFormComplete.js`, `frontend/src/components/CompactNewTicketStepper.js` (steps in `CompactNewTicketStepper/steps/`)
 - Sites: `frontend/src/CompactSites.js`, `frontend/src/CompactSiteDetail.js`, `frontend/src/CompactSiteForm.js`
 - Users: `frontend/src/CompactUsers.js`, `frontend/src/CompactUserForm.js`
 - Tasks: `frontend/src/CompactTasks.js`, `frontend/src/CompactTaskForm.js`

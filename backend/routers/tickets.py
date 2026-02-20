@@ -130,9 +130,9 @@ def create_ticket(
     background_tasks: BackgroundTasks = None
 ):
     """Create a new ticket"""
-    # Wrap to return cleaner errors
+    ticket_with_creator = ticket.model_copy(update={"created_by": current_user.user_id})
     try:
-        result = crud.create_ticket(db=db, ticket=ticket)
+        result = crud.create_ticket(db=db, ticket=ticket_with_creator)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not create ticket: {str(e)}")
     

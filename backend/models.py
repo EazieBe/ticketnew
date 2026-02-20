@@ -182,6 +182,7 @@ class Ticket(Base):
     special_flag = Column(String)
     last_updated_by = Column(String, ForeignKey('users.user_id'))
     last_updated_at = Column(DateTime)
+    created_by = Column(String, ForeignKey('users.user_id'))
     
     # New Ticket Type System Fields
     claimed_by = Column(String, ForeignKey('users.user_id'))  # In-house tech who claimed ticket
@@ -248,6 +249,7 @@ class Ticket(Base):
     site = relationship('Site', back_populates='tickets')
     assigned_user = relationship('User', foreign_keys=[assigned_user_id], back_populates='tickets')
     last_updated_user = relationship('User', foreign_keys=[last_updated_by], back_populates='last_updated_tickets')
+    created_by_user = relationship('User', foreign_keys=[created_by])
     approved_user = relationship('User', foreign_keys=[approved_by])
     claimed_user = relationship('User', foreign_keys=[claimed_by], overlaps="claimed_tickets")
     onsite_tech = relationship('FieldTech', back_populates='onsite_tickets')

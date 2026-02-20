@@ -314,3 +314,56 @@ def test_mark_return_received(auth_headers, ensure_test_site, test_site_id):
     data = mark_resp.json()
     assert data.get("parts_received") is True
     assert data.get("follow_up_required") is False
+
+
+def test_workflow_transition_requires_expected_version(auth_headers, ensure_test_site, test_site_id):
+    """POST /tickets/{id}/workflow-transition without expected_ticket_version returns 422."""
+    create_resp = client.post(
+        "/tickets/",
+        json={"site_id": test_site_id, "type": "inhouse", "status": "open"},
+        headers=auth_headers,
+    )
+    assert create_resp.status_code == 200, create_resp.text
+    ticket_id = create_resp.json()["ticket_id"]
+
+    resp = client.post(
+        f"/tickets/{ticket_id}/workflow-transition",
+        json={"workflow_state": "needstech", "notes": "No version"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422, resp.text
+
+
+def test_mark_return_received_requires_expected_version(auth_headers, ensure_test_site, test_site_id):
+    """POST /tickets/{id}/returns/received without expected_ticket_version returns 422."""
+    create_resp = client.post(
+        "/tickets/",
+        json={"site_id": test_site_id, "type": "onsite", "status": "open"},
+        headers=auth_headers,
+    )
+    assert create_resp.status_code == 200, create_resp.text
+    ticket_id = create_resp.json()["ticket_id"]
+
+    resp = client.post(
+        f"/tickets/{ticket_id}/returns/received",
+        json={"notes": "No version"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422, resp.text
+
+
+def test_ticket_create_sets_created_by(auth_headers, ensure_test_site, test_site_id):
+    """Creating a ticket sets created_by to the current user."""
+    create_resp = client.post(
+        "/tickets/",
+        json={"site_id": test_site_id, "type": "onsite", "status": "open", "notes": "Created by test"},
+        headers=auth_headers,
+    )
+    assert create_resp.status_code == 200, create_resp.text
+    created = create_resp.json()
+    assert "created_by" in created
+    assert created["created_by"] is not None
+    ticket_id = created["ticket_id"]
+    get_resp = client.get(f"/tickets/{ticket_id}", headers=auth_headers)
+    assert get_resp.status_code == 200, get_resp.text
+    assert get_resp.json().get("created_by") == created["created_by"]

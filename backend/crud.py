@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session, joinedload, selectinload
-from sqlalchemy import and_, or_, desc, asc, case, update, func
+from sqlalchemy import and_, or_, desc, asc, case, update, func, text
 import models, schemas
 import uuid
 from datetime import date, datetime, timezone
@@ -267,11 +267,14 @@ def delete_site(db: Session, site_id: str):
 # =============================================================================
 
 def generate_ticket_id(db: Session) -> str:
-    """Generate a sequential ticket ID in format: YYYY-NNNNNN"""
+    """Generate a sequential ticket ID in format: YYYY-NNNNNN. Uses advisory lock to prevent duplicate IDs under concurrent create."""
     from datetime import datetime, timezone
     
     current_year = datetime.now(timezone.utc).year
     year_prefix = str(current_year)
+    # Advisory lock key per year so concurrent creates for same year serialize on ID generation
+    lock_key = 1000000 + current_year
+    db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": lock_key})
     
     # Get the highest ticket number for this year
     latest_ticket = db.query(models.Ticket).filter(
@@ -356,6 +359,7 @@ def create_ticket(db: Session, ticket: schemas.TicketCreate):
         special_flag=ticket.special_flag,
         last_updated_by=ticket.last_updated_by,
         last_updated_at=ticket.last_updated_at,
+        created_by=getattr(ticket, "created_by", None),
         # New Ticket Type System Fields
         claimed_by=ticket.claimed_by,
         claimed_at=ticket.claimed_at,
@@ -440,6 +444,46 @@ def get_ticket_for_response(db: Session, ticket_id: str):
         joinedload(models.Ticket.claimed_user),
     ).filter(models.Ticket.ticket_id == ticket_id).first()
 
+def _apply_ticket_list_filters(query, status, workflow_state, priority, assigned_user_id, site_id, ticket_type, search):
+    """Apply common ticket list/count filters. Returns the modified query."""
+    if status:
+        if status == 'active':
+            query = query.filter(~models.Ticket.status.in_([
+                models.TicketStatus.completed,
+                models.TicketStatus.closed,
+                models.TicketStatus.approved,
+                models.TicketStatus.archived,
+            ]))
+        else:
+            try:
+                enum_status = models.TicketStatus(status)
+                query = query.filter(models.Ticket.status == enum_status)
+            except Exception:
+                query = query.filter(models.Ticket.status == status)
+    if workflow_state:
+        query = query.filter(models.Ticket.workflow_state == workflow_state)
+    if priority:
+        query = query.filter(models.Ticket.priority == priority)
+    if assigned_user_id:
+        query = query.filter(models.Ticket.assigned_user_id == assigned_user_id)
+    if site_id:
+        query = query.filter(models.Ticket.site_id == site_id)
+    if ticket_type:
+        query = query.filter(models.Ticket.type == ticket_type)
+    if search:
+        clean = search.strip()
+        like_any = f"%{clean}%"
+        like_prefix = f"{clean}%"
+        query = query.filter(or_(
+            models.Ticket.ticket_id.ilike(like_prefix),
+            models.Ticket.site_id.ilike(like_prefix),
+            models.Ticket.inc_number.ilike(like_prefix),
+            models.Ticket.so_number.ilike(like_prefix),
+            models.Ticket.notes.ilike(like_any)
+        ))
+    return query
+
+
 def get_tickets(db: Session, skip: int = 0, limit: int = 100, 
                 status: Optional[str] = None, 
                 workflow_state: Optional[str] = None,
@@ -458,48 +502,7 @@ def get_tickets(db: Session, skip: int = 0, limit: int = 100,
             joinedload(models.Ticket.claimed_user),
             joinedload(models.Ticket.onsite_tech)
         )
-    
-    # Apply filters
-    if status:
-        # Support logical "active" status by excluding terminal states
-        if status == 'active':
-            query = query.filter(~models.Ticket.status.in_([
-                models.TicketStatus.completed,
-                models.TicketStatus.closed,
-                models.TicketStatus.approved,
-                models.TicketStatus.archived,
-            ]))
-        else:
-            # Compare against enum when possible; fall back to string
-            try:
-                enum_status = models.TicketStatus(status)
-                query = query.filter(models.Ticket.status == enum_status)
-            except Exception:
-                query = query.filter(models.Ticket.status == status)
-    if workflow_state:
-        query = query.filter(models.Ticket.workflow_state == workflow_state)
-    if priority:
-        query = query.filter(models.Ticket.priority == priority)
-    if assigned_user_id:
-        query = query.filter(models.Ticket.assigned_user_id == assigned_user_id)
-    if site_id:
-        query = query.filter(models.Ticket.site_id == site_id)
-    if ticket_type:
-        query = query.filter(models.Ticket.type == ticket_type)
-    if search:
-        clean = search.strip()
-        like_any = f"%{clean}%"
-        like_prefix = f"{clean}%"
-        query = query.filter(or_(
-            # Prefix search is index-friendly for identifiers
-            models.Ticket.ticket_id.ilike(like_prefix),
-            models.Ticket.site_id.ilike(like_prefix),
-            models.Ticket.inc_number.ilike(like_prefix),
-            models.Ticket.so_number.ilike(like_prefix),
-            # Keep contains search for notes
-            models.Ticket.notes.ilike(like_any)
-        ))
-    
+    query = _apply_ticket_list_filters(query, status, workflow_state, priority, assigned_user_id, site_id, ticket_type, search)
     return query.order_by(desc(models.Ticket.created_at)).offset(skip).limit(limit).all()
 
 def count_tickets(db: Session,
@@ -511,42 +514,9 @@ def count_tickets(db: Session,
                   ticket_type: Optional[str] = None,
                   search: Optional[str] = None) -> int:
     query = db.query(models.Ticket)
-    if status:
-        if status == 'active':
-            query = query.filter(~models.Ticket.status.in_([
-                models.TicketStatus.completed,
-                models.TicketStatus.closed,
-                models.TicketStatus.approved,
-                models.TicketStatus.archived,
-            ]))
-        else:
-            try:
-                enum_status = models.TicketStatus(status)
-                query = query.filter(models.Ticket.status == enum_status)
-            except Exception:
-                query = query.filter(models.Ticket.status == status)
-    if workflow_state:
-        query = query.filter(models.Ticket.workflow_state == workflow_state)
-    if priority:
-        query = query.filter(models.Ticket.priority == priority)
-    if assigned_user_id:
-        query = query.filter(models.Ticket.assigned_user_id == assigned_user_id)
-    if site_id:
-        query = query.filter(models.Ticket.site_id == site_id)
-    if ticket_type:
-        query = query.filter(models.Ticket.type == ticket_type)
-    if search:
-        clean = search.strip()
-        like_any = f"%{clean}%"
-        like_prefix = f"{clean}%"
-        query = query.filter(or_(
-            models.Ticket.ticket_id.ilike(like_prefix),
-            models.Ticket.site_id.ilike(like_prefix),
-            models.Ticket.inc_number.ilike(like_prefix),
-            models.Ticket.so_number.ilike(like_prefix),
-            models.Ticket.notes.ilike(like_any)
-        ))
+    query = _apply_ticket_list_filters(query, status, workflow_state, priority, assigned_user_id, site_id, ticket_type, search)
     return query.count()
+
 
 def update_ticket(db: Session, ticket_id: str, ticket: schemas.TicketUpdate):
     """Update ticket with optimized query"""
